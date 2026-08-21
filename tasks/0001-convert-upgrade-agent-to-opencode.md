@@ -1,0 +1,78 @@
+# OpenCode Upgrade Agent Plugin
+
+## Rationale
+
+Make the existing Upgrade Agent available as the npm package `opencode-upgrade-agent` without reimplementing Microsoft’s upgrade workflows. Keep the existing agents, skills, and extender manifests as upstream-compatible source assets, and add a thin OpenCode runtime adapter around them to minimize future merge conflicts.
+
+## Acceptance criteria (AC)
+
+- [ ] `opencode-upgrade-agent` can be installed as an OpenCode plugin on Linux, macOS, and Windows, with installation, restart, prerequisites, and usage documented.
+- [ ] Before MCP startup, the plugin reports actionable diagnostics for missing `dnx`, .NET SDK 10+, Node.js, or `npx` prerequisites instead of surfacing an opaque MCP connection failure.
+- [ ] The plugin registers all bundled agents (16 at baseline) at runtime with the correct primary/subagent visibility, mapped permissions, and user-selected OpenCode model defaults.
+- [ ] A shared compatibility instruction maps Copilot behavior to OpenCode: `execute` to `bash`, `search` to `glob`/`grep`, `web` to `webfetch`, `ask_user` to `question`, `agent`/`read_agent` to `task`, MCP tool names to their OpenCode IDs, and Canvas behavior to textual status and artifact paths.
+- [ ] Agent conversion reports one aggregated warning for unknown optional frontmatter properties and fails initialization for unknown behavior-affecting properties, tools, or unsafe permission mappings.
+- [ ] The plugin config hook discovers bundled extender manifests and registers the core Upgrade, .NET, and TypeScript MCP servers from the existing definitions, then gives related servers one generated `COPILOT_AGENT_SESSION_ID` per plugin instance.
+- [ ] Core, .NET, and TypeScript MCP package versions are pinned as one tested compatibility set in an OpenCode-owned version manifest; each package retains its independent version scheme, and packaging validates that every MCP has an explicit pin.
+- [ ] Renovate proposes updates for all three MCP packages in one compatibility-stack group; MCP updates are never auto-merged and must pass integration and smoke tests.
+- [ ] Every registered MCP receives and honors `APPMOD_DISABLE_TELEMETRY=true` and receives `APPMOD_DISABLE_MCP_APPS=true`; compatibility validation fails if any MCP cannot disable telemetry transmission. Required existing caller-type settings and cold-start timeouts remain effective.
+- [ ] The Microsoft MCP workflow remains authoritative: `get_scenarios`, `get_instructions`, and `start_task` provide scenario discovery, progressive skill loading, and task-related skill matching without exposing all bundled skills through OpenCode’s native global skill list.
+- [ ] All existing workflows and all bundled skill directories (102 at baseline) remain available through MCP routing, including safe access to referenced files, scripts, and templates, without changing their authored contents.
+- [ ] Upgrade progress is reported through text, `get_state`, and existing scenario artifacts; no agent attempts to open a Canvas or dashboard.
+- [ ] Copilot telemetry hooks, marketplace metadata, cloud-agent setup, Canvas extension, and documentation/assets used only by those features are removed.
+- [ ] Unit tests cover manifest/frontmatter conversion, tool and permission mapping, shared compatibility injection, MCP environment construction, unknown-property diagnostics, and safe asset-path handling.
+- [ ] Packaging validates that every bundled agent, skill, and extender is converted or explicitly rejected with an actionable error, so upstream additions cannot be silently omitted.
+- [ ] Integration tests prove that all three MCPs initialize, the orchestrator and extenders connect through the shared session ID, representative scenario and lazy skills resolve, referenced resources load, and task-related skills are returned.
+- [ ] Integration tests prove that the primary agent can dispatch every registered worker through OpenCode `task` and consume each result directly without `read_agent`.
+- [ ] Concurrent OpenCode sessions do not cross-wire MCP workflow state or extender communication.
+- [ ] End-to-end smoke tests cover one representative .NET workflow and one representative TypeScript workflow, including textual interaction and status reporting.
+- [ ] The repository’s formatting, validation, and full test commands pass.
+
+## Out of Scope
+
+- Native OpenCode registration of every bundled skill.
+- Plugin-provided replacements for Microsoft MCP skill routing, including `upgrade_skill_search` or `upgrade_skill_load`.
+- Canvas, web dashboard, MCP UI, or another graphical status surface.
+- Telemetry collection by the plugin or its MCP processes.
+- GitHub Copilot marketplace, CLI plugin, App, or cloud coding-agent compatibility.
+- Reimplementation of Microsoft MCP tools or workflow state management.
+
+## Technical details
+
+### Keep the adapter thin
+
+- Treat the existing agent files, skill trees, and `upgrade-extension.json` files as canonical source assets.
+- Register converted OpenCode agents in the plugin `config` hook rather than maintaining hand-edited OpenCode copies.
+- Keep host mappings in one compatibility file and conversion module; do not duplicate them across agent prompts.
+- Preserve least-privilege tool access. Never convert an unknown tool to a wildcard permission.
+
+### Let the MCP servers retain workflow ownership
+
+- Treat MCP compatibility as the first implementation gate. Before converting every agent or removing Copilot-only files, prove shared-session peer connectivity, scenario discovery, skill/resource loading, task-related skill matching, and concurrent-session isolation in OpenCode. Stop and report incompatibility if this gate fails.
+- Translate the primary agent’s MCP definition and every discovered `extenders/*/upgrade-extension.json` manifest into OpenCode local MCP entries; do not hardcode the current two extender paths.
+- Start related MCPs with a shared generated session identifier so the orchestrator/extender peer protocol can connect.
+- Preserve the source definitions’ commands, arguments, release alignment, caller types, and timeout intent.
+- Keep MCP pins in one OpenCode-owned version manifest rather than editing upstream manifests. Use Renovate custom managers with the NuGet and npm datasources; group all three MCP packages as one compatibility stack, preserve their independent versions, disable automerge, and require the compatibility gate before accepting updates.
+- Do not duplicate trait detection or skill ranking in the plugin. The MCP lifecycle and skill metadata remain responsible for applicable scenarios and progressive disclosure.
+- Make bundled/read-through skill resources accessible without granting unrestricted external-directory access.
+
+### Convert host-specific behavior once
+
+- OpenCode `task` calls return worker results directly; compatibility instructions must override Copilot’s background `agent` plus `read_agent` polling protocol.
+- Use `question` for structured choices and plain text only when `question` is unavailable.
+- Remove Canvas/open-dashboard instructions and report concise progress plus full artifact paths instead.
+- Derive OpenCode model selection from user configuration where possible; do not retain invalid provider-less Copilot model identifiers.
+
+### Remove obsolete host packaging together
+
+- Replace Copilot distribution manifests with npm/OpenCode package metadata and focused OpenCode installation documentation; retain `upgrade-extension.json` manifests as canonical adapter inputs.
+- Remove telemetry hook registration and scripts as one concern.
+- Remove marketplace files/assets, cloud-agent files, and Canvas files/references as separate focused cleanup groups to simplify review and upstream reconciliation.
+
+## Notes / risks / open questions
+
+- The core and extender MCP packages require the same `COPILOT_AGENT_SESSION_ID` despite the Copilot-specific variable name. Identifier lifetime must preserve isolation when OpenCode has concurrent sessions.
+- Microsoft documents these MCP packages primarily for Copilot and VS Code. MCP-first compatibility is a hard validation gate: if OpenCode cannot obtain scenarios, routed skills, task-related skills, or referenced resources, stop and report the incompatibility rather than silently adding a second routing implementation.
+- TypeScript workflow tools normally emit telemetry observations. Verify that the pinned TypeScript MCP honors the telemetry opt-out without breaking required workflow tools; otherwise stop at the compatibility gate.
+- `dnx` requires .NET SDK 10 or later; repositories pinned to older SDKs may require the documented `global.json` roll-forward handling.
+- Cold package caches can make first MCP initialization slow. Preserve the existing five-minute .NET startup allowance and test a cold start.
+- Skill scripts and templates may resolve outside the user workspace after npm installation. Constrain access to the plugin’s bundled asset roots and reject traversal or arbitrary absolute paths.
