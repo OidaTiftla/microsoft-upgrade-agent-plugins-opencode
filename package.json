@@ -1,0 +1,21 @@
+{
+  "name": "opencode-upgrade-agent",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./mcp-prerequisites": "./src/mcp-prerequisites.ts"
+  },
+  "scripts": {
+    "format": "prettier --write package.json tsconfig.json scripts src test",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/mcp-prerequisites.test.ts test/mcp-process-definitions.test.ts",
+    "test:integration": "node scripts/mcp-compatibility-gate.ts"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@types/node": "^24.0.0",
+    "prettier": "^3.6.0",
+    "typescript": "^5.8.0"
+  }
+}
