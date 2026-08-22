@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export interface McpVersionPin {
@@ -6,11 +6,7 @@ export interface McpVersionPin {
   readonly version: string;
 }
 
-export interface McpVersionManifest {
-  readonly core: McpVersionPin;
-  readonly dotnet: McpVersionPin;
-  readonly typescript: McpVersionPin;
-}
+export type McpVersionManifest = Readonly<Record<string, McpVersionPin>>;
 
 export interface CoreHostDiscovery {
   readonly hostDir: string;
@@ -35,11 +31,6 @@ export interface HostDiscoveryFiles {
 
 const DNX_TIMEOUT_MS = 300_000;
 const PINNED_VERSION = /^\d+\.\d+\.\d+$/;
-const extenderDefinitions = [
-  { id: "upgrade-dotnet", pin: "dotnet", skillsRoot: "upgrade/skills" },
-  { id: "upgrade-typescript", pin: "typescript", skillsRoot: "upgrade/skills" },
-] as const;
-
 function getVersionPin(
   manifest: Record<string, unknown>,
   name: string,
@@ -61,12 +52,13 @@ function getVersionPin(
   return { package: packageName, version };
 }
 
-function pinExtenderManifest(
+function getExtenderPackage(
+  id: string,
   manifest: unknown,
-  pin: McpVersionPin,
-): Record<string, unknown> {
+  pins: readonly McpVersionPin[],
+): { packageIndex: number; pin: McpVersionPin } {
   if (manifest === null || typeof manifest !== "object") {
-    throw new Error("Extender manifest must be an object.");
+    throw new Error(`Extender ${id} manifest must be an object.`);
   }
 
   const source = manifest as Record<string, unknown>;
@@ -76,19 +68,54 @@ function pinExtenderManifest(
     typeof mcp !== "object" ||
     !Array.isArray((mcp as { args?: unknown }).args)
   ) {
-    throw new Error("Extender manifest requires mcp.args.");
+    throw new Error(`Extender ${id} manifest requires mcp.args.`);
   }
   const args = (mcp as { args: unknown[] }).args;
-  const packageIndex = args.findIndex((argument) => argument === pin.package);
-  if (packageIndex < 0) {
-    throw new Error(`Extender manifest does not reference ${pin.package}.`);
+  if (args.some((argument) => typeof argument !== "string"))
+    throw new Error(`Extender ${id} manifest requires string mcp.args.`);
+
+  const matches = args.flatMap((argument, packageIndex) =>
+    pins
+      .filter((pin) => pin.package === argument)
+      .map((pin) => ({ packageIndex, pin })),
+  );
+  if (matches.length === 0)
+    throw new Error(
+      `Extender ${id} has an unpinned MCP package argument. Add an explicit pin to src/mcp-versions.json.`,
+    );
+  if (matches.length !== 1)
+    throw new Error(`Extender ${id} must reference exactly one MCP package.`);
+  return matches[0];
+}
+
+async function loadExtenderManifest(
+  id: string,
+  path: string,
+): Promise<Record<string, unknown>> {
+  try {
+    return JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      throw new Error(`Extender ${id} requires upgrade-extension.json.`);
+    if (error instanceof SyntaxError)
+      throw new Error(`Extender ${id} has invalid upgrade-extension.json.`);
+    throw error;
   }
+}
+
+function pinExtenderManifest(
+  manifest: Record<string, unknown>,
+  packageIndex: number,
+  pin: McpVersionPin,
+): Record<string, unknown> {
+  const mcp = manifest.mcp as Record<string, unknown>;
+  const args = mcp.args as unknown[];
   const pinnedArgs = [...args];
   pinnedArgs[packageIndex] = `${pin.package}@${pin.version}`;
   return {
-    ...source,
+    ...manifest,
     mcp: {
-      ...(mcp as Record<string, unknown>),
+      ...mcp,
       args: pinnedArgs,
     },
   };
@@ -100,11 +127,18 @@ export function parseMcpVersionManifest(manifest: unknown): McpVersionManifest {
   }
 
   const pins = manifest as Record<string, unknown>;
-  return {
-    core: getVersionPin(pins, "core"),
-    dotnet: getVersionPin(pins, "dotnet"),
-    typescript: getVersionPin(pins, "typescript"),
-  };
+  const parsed = Object.fromEntries(
+    Object.keys(pins)
+      .sort()
+      .map((name) => [name, getVersionPin(pins, name)]),
+  );
+  const packages = Object.values(parsed).map(
+    ({ package: packageName }) => packageName,
+  );
+  if (new Set(packages).size !== packages.length)
+    throw new Error("MCP version manifest packages must be unique.");
+  getVersionPin(parsed, "core");
+  return parsed;
 }
 
 export async function loadMcpVersionManifest(
@@ -117,11 +151,12 @@ export function createCoreMcpProcessDefinition(
   manifest: McpVersionManifest,
   discovery: CoreHostDiscovery,
 ): McpProcessDefinition {
+  const core = getVersionPin(manifest, "core");
   return {
     name: "Upgrade",
     command: "dnx",
     args: [
-      `${manifest.core.package}@${manifest.core.version}`,
+      `${core.package}@${core.version}`,
       "--yes",
       "--ignore-failed-sources",
     ],
@@ -142,29 +177,34 @@ export async function writeHostDiscoveryFiles(
   manifest: McpVersionManifest,
 ): Promise<HostDiscoveryFiles> {
   await mkdir(hostDir, { recursive: true });
+  const extendersRoot = join(pluginRoot, "extenders");
+  const extenderIds = (await readdir(extendersRoot, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
   const extenders = await Promise.all(
-    extenderDefinitions.map(async ({ id, pin, skillsRoot }) => {
-      const sourcePath = join(
-        pluginRoot,
-        "extenders",
-        id,
-        "upgrade-extension.json",
-      );
+    extenderIds.map(async (id) => {
+      const sourcePath = join(extendersRoot, id, "upgrade-extension.json");
       const manifestPath = join(
         hostDir,
         "extenders",
         id,
         "upgrade-extension.json",
       );
-      const source = JSON.parse(await readFile(sourcePath, "utf8"));
+      const source = await loadExtenderManifest(id, sourcePath);
+      const { packageIndex, pin } = getExtenderPackage(
+        id,
+        source,
+        Object.values(manifest),
+      );
       await mkdir(dirname(manifestPath), { recursive: true });
       await writeFile(
         manifestPath,
-        `${JSON.stringify(pinExtenderManifest(source, manifest[pin]), null, 2)}\n`,
+        `${JSON.stringify(pinExtenderManifest(source, packageIndex, pin), null, 2)}\n`,
       );
       return {
         manifestPath,
-        skillsRoot: join(pluginRoot, "extenders", id, skillsRoot),
+        skillsRoot: join(extendersRoot, id, "upgrade", "skills"),
       };
     }),
   );

@@ -7,18 +7,18 @@ Make the existing Upgrade Agent available as the npm package `opencode-upgrade-a
 ## Acceptance criteria (AC)
 
 - [ ] `opencode-upgrade-agent` can be installed as an OpenCode plugin on Linux, macOS, and Windows, with installation, restart, prerequisites, and usage documented.
-- [ ] Before MCP startup, the plugin reports actionable diagnostics for missing `dnx`, .NET SDK 10+, Node.js, or `npx` prerequisites instead of surfacing an opaque MCP connection failure.
-- [ ] The plugin registers all bundled agents (16 at baseline) at runtime with the correct primary/subagent visibility, mapped permissions, and user-selected OpenCode model defaults.
-- [ ] A shared compatibility instruction maps Copilot behavior to OpenCode: `execute` to `bash`, `search` to `glob`/`grep`, `web` to `webfetch`, `ask_user` to `question`, `agent`/`read_agent` to `task`, MCP tool names to their OpenCode IDs, and Canvas behavior to textual status and artifact paths.
-- [ ] Agent conversion reports one aggregated warning for unknown optional frontmatter properties and fails initialization for unknown behavior-affecting properties, tools, or unsafe permission mappings.
-- [ ] The plugin config hook discovers bundled extender manifests, writes a host-owned `host-extenders.json` plus pinned derived manifests, and registers only the Core Upgrade MCP; Core launches and proxies the .NET and TypeScript extenders.
+- [x] Before MCP startup, the plugin reports actionable diagnostics for missing `dnx`, .NET SDK 10+, Node.js, or `npx` prerequisites instead of surfacing an opaque MCP connection failure.
+- [x] The plugin registers all bundled agents (16 at baseline) at runtime with the correct primary/subagent visibility, mapped permissions, and user-selected OpenCode model defaults.
+- [x] A shared compatibility instruction maps Copilot behavior to OpenCode: `execute` to `bash`, `search` to `glob`/`grep`, `web` to `webfetch`, `ask_user` to `question`, `agent`/`read_agent` to `task`, MCP tool names to their OpenCode IDs, and Canvas behavior to textual status and artifact paths.
+- [x] Agent conversion reports one aggregated warning for unknown optional frontmatter properties and fails initialization for unknown behavior-affecting properties, tools, or unsafe permission mappings.
+- [x] The plugin config hook discovers bundled extender manifests, writes a host-owned `host-extenders.json` plus pinned derived manifests, and registers only the Core Upgrade MCP; Core launches and proxies the .NET and TypeScript extenders.
 - [ ] Core, .NET, and TypeScript MCP package versions are pinned as one tested compatibility set in an OpenCode-owned version manifest; each package retains its independent version scheme, and packaging validates that every MCP has an explicit pin.
 - [ ] Renovate proposes updates for all three MCP packages in one compatibility-stack group; MCP updates are never auto-merged and must pass integration and smoke tests.
 - [ ] Core receives `APPMOD_DISABLE_TELEMETRY=true` and `APPMOD_DISABLE_MCP_APPS=true`, spawned extenders inherit the opt-outs, and compatibility validation fails if any MCP cannot disable telemetry transmission. Required existing caller-type settings and cold-start timeouts remain effective.
 - [ ] The Microsoft MCP workflow remains authoritative: `get_scenarios`, `get_instructions`, and `start_task` provide scenario discovery, progressive skill loading, and task-related skill matching without exposing all bundled skills through OpenCode’s native global skill list.
-- [ ] All existing workflows and all bundled skill directories (102 at baseline) remain available through MCP routing, including safe access to referenced files, scripts, and templates, without changing their authored contents.
+- [ ] All existing workflows and all in-scope bundled skill directories (101 after removing the source baseline’s Canvas-only skill) remain available through MCP routing, including safe access to referenced files, scripts, and templates, without changing their authored contents.
 - [ ] Upgrade progress is reported through text, `get_state`, and existing scenario artifacts; no agent attempts to open a Canvas or dashboard.
-- [ ] Copilot telemetry hooks, marketplace metadata, cloud-agent setup, Canvas extension, and documentation/assets used only by those features are removed.
+- [x] Copilot telemetry hooks, marketplace metadata, cloud-agent setup, Canvas extension, and documentation/assets used only by those features are removed.
 - [ ] Unit tests cover manifest/frontmatter conversion, tool and permission mapping, shared compatibility injection, MCP environment construction, unknown-property diagnostics, and safe asset-path handling.
 - [ ] Packaging validates that every bundled agent, skill, and extender is converted or explicitly rejected with an actionable error, so upstream additions cannot be silently omitted.
 - [ ] Integration tests prove that Core discovers and launches both pinned extenders through `APPMOD_HOST_DIR`, proxies their tools, resolves representative scenario and lazy skills plus referenced resources, and returns task-related skills.

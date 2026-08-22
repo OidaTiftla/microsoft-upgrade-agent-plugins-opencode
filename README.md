@@ -1,62 +1,40 @@
-# GitHub Copilot upgrade
+# OpenCode Upgrade Agent
 
-GitHub Copilot upgrade is an AI-powered agent that helps you upgrade applications to newer versions of languages, frameworks, and runtimes. It assesses your application, creates an upgrade plan, applies code changes, and validates the results through an interactive upgrade workflow.
+`opencode-upgrade-agent` brings Microsoft Upgrade Agent workflows to OpenCode. It supports .NET and TypeScript/JavaScript upgrades through the Core `Upgrade` MCP and bundled extenders.
 
-## Get started
+## Install and restart OpenCode
 
-GitHub Copilot upgrade is available from both the GitHub Copilot app and GitHub Copilot CLI.
+Install the npm package, then restart OpenCode so it reloads the plugin configuration.
 
-### GitHub Copilot app
-
-[**Add this marketplace in the GitHub Copilot app →**](https://github.com/copilot/app/launch?entry_point=upgrade_agent_plugins_readme&open=ghapp%3A%2F%2Fplugins%2Fmarketplace%2Fadd%3Fsource%3Dmicrosoft%2Fupgrade-agent-plugins)
-
-This opens the GitHub Copilot app to confirm your intention to add the marketplace: 
-
-<img width="411" height="252" alt="image" src="assets/Copilot-App-Allow-Add-Marketplace-Dark.png" />
-
-Once allowed, it will pre-populate the marketplace form: 
-
-<img width="670" height="336" alt="image" src="assets/Copilot-App-Add-Marketplace-Dark.png" />
-
-After adding the marketplace, installing the plugin is a single click from within the UI:
-
-<img width="650" height="131" alt="image" src="assets/Copilot-App-Install-Plugin-Dark.png" />
-
-_Note: Prior to v1.0.3 of the GitHub Copilot app, you will need to restart the app after installing the plugin before you can use the GitHub Copilot upgrade agent._
-
-Select the ```Upgrade``` agent from the Agent Picker:
-<img width="650" height="180" alt="image" src="assets/Copilot-App-Select-Agent-Dark.png" />
-
-Prompt the agent: 
-
-```
-upgrade my project to .NET 10
+```bash
+opencode plugin opencode-upgrade-agent
 ```
 
-### GitHub Copilot CLI
+The plugin requires the .NET SDK 10 or later (`dnx`), Node.js, npm, and npx. It disables telemetry and MCP Apps for the Core MCP and its extenders.
 
-Add the marketplace:
+## Select Upgrade and describe the work
 
-```javascript
-/plugin marketplace add microsoft/upgrade-agent-plugins
-```
+Select `Upgrade` in OpenCode's agent picker, then describe the upgrade.
 
-Install the GitHub Copilot upgrade plugin:
-```javascript
-/plugin install upgrade-agent@upgrade-agent-plugins
-```
-Select the agent:
-
-```/agent``` to select  ```Upgrade ```
-
-Prompt the agent: 
-
-```
+```text
 upgrade my solution to .NET 10
 ```
 
-### GitHub Copilot Coding Agent
+The agent reports progress as text and gives full artifact paths. Canvas and dashboard features are unavailable.
 
-A custom agent definition and setup steps are provided for use with [Copilot Coding Agent](https://docs.github.com/en/copilot/using-github-copilot/using-copilot-coding-agent) in GitHub. This allows Copilot to upgrade projects directly via pull requests.
+Optional test-baseline generation needs an already registered `code-testing-generator` agent. OpenCode does not install Copilot plugins; choose the workflow's Skip path when that optional integration is unavailable.
 
-See the [cloud-agent README](cloud-agent/README.md) for setup instructions.
+Core binds an MCP process to the first repository path it receives. Restart OpenCode before switching repositories.
+
+## Validate changes during development
+
+```bash
+npm run format
+npm run typecheck
+npm test # executes the following tests:
+# npm run test:plugin
+# npm run test:integration
+# npm run test:opencode
+# npm run test:package
+npm run pack:dry-run
+```

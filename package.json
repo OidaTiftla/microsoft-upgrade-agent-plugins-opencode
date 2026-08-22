@@ -1,19 +1,33 @@
 {
   "name": "opencode-upgrade-agent",
-  "version": "0.0.0",
+  "version": "1.1.441",
+  "description": "OpenCode adapter for the Microsoft Upgrade Agent workflows.",
   "type": "module",
-  "exports": {
-    ".": "./src/index.ts",
-    "./mcp-prerequisites": "./src/mcp-prerequisites.ts"
-  },
+  "exports": "./src/index.ts",
+  "files": [
+    "src",
+    "plugins/upgrade-agent/agents",
+    "plugins/upgrade-agent/extenders",
+    "plugins/upgrade-agent/upgrade/skills",
+    "README.md",
+    "LICENSE.md"
+  ],
   "scripts": {
     "format": "prettier --write package.json tsconfig.json scripts src test",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/mcp-prerequisites.test.ts test/mcp-process-definitions.test.ts",
-    "test:integration": "node scripts/mcp-compatibility-gate.ts"
+    "test": "npm run test:plugin && npm run test:integration && npm run test:opencode && npm run test:package",
+    "test:plugin": "node --test \"test/**/*.test.ts\"",
+    "test:integration": "node scripts/mcp-compatibility-gate.ts",
+    "test:opencode": "node scripts/opencode-smoke.ts",
+    "test:package": "node scripts/package-validation.ts",
+    "pack:dry-run": "npm pack --dry-run --json --ignore-scripts"
+  },
+  "dependencies": {
+    "yaml": "2.9.0"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
+    "@opencode-ai/plugin": "1.18.21",
     "@types/node": "^24.0.0",
     "prettier": "^3.6.0",
     "typescript": "^5.8.0"

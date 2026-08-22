@@ -1,0 +1,38 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^src\\/mcp-versions\\.json$/"],
+      "matchStrings": [
+        "\\\"package\\\"\\s*:\\s*\\\"(?<depName>Microsoft\\.GitHubCopilot\\.Upgrade(?:\\.DotNet)?\\.Mcp)\\\"\\s*,\\s*\\\"version\\\"\\s*:\\s*\\\"(?<currentValue>[^\\\"]+)\\\""
+      ],
+      "datasourceTemplate": "nuget",
+      "versioningTemplate": "nuget"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^src\\/mcp-versions\\.json$/"],
+      "matchStrings": [
+        "\\\"package\\\"\\s*:\\s*\\\"(?<depName>@microsoft\\/jsts-upgrade-assistant)\\\"\\s*,\\s*\\\"version\\\"\\s*:\\s*\\\"(?<currentValue>[^\\\"]+)\\\""
+      ],
+      "datasourceTemplate": "npm",
+      "versioningTemplate": "npm"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Keep tested Upgrade MCP package pins compatible.",
+      "matchManagers": ["custom.regex"],
+      "matchPackageNames": [
+        "Microsoft.GitHubCopilot.Upgrade.Mcp",
+        "Microsoft.GitHubCopilot.Upgrade.DotNet.Mcp",
+        "@microsoft/jsts-upgrade-assistant"
+      ],
+      "groupName": "Upgrade MCP compatibility stack",
+      "automerge": false,
+      "ignoreTests": false
+    }
+  ]
+}
