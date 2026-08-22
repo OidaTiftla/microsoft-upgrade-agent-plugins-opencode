@@ -13,21 +13,23 @@
     "LICENSE.md"
   ],
   "scripts": {
-    "format": "prettier --write package.json tsconfig.json scripts src test",
+    "format": "prettier --write package.json tsconfig.json scripts src test README.md .github/workflows",
+    "format:check": "prettier --check package.json tsconfig.json scripts src test README.md .github/workflows",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:plugin && npm run test:integration && npm run test:opencode && npm run test:package",
     "test:plugin": "node --test \"test/**/*.test.ts\"",
     "test:integration": "node scripts/mcp-compatibility-gate.ts",
     "test:opencode": "node scripts/opencode-smoke.ts",
     "test:package": "node scripts/package-validation.ts",
+    "test:sampling-e2e": "node scripts/sampling-e2e.ts",
     "pack:dry-run": "npm pack --dry-run --json --ignore-scripts"
   },
   "dependencies": {
+    "@opencode-ai/plugin": "1.18.21",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "yaml": "2.9.0"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "1.29.0",
-    "@opencode-ai/plugin": "1.18.21",
     "@types/node": "^24.0.0",
     "prettier": "^3.6.0",
     "typescript": "^5.8.0"

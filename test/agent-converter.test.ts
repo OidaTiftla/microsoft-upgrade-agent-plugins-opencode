@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -94,6 +95,17 @@ test("convertAgentSource_UnknownProperty_Expect_ThrowsException", () => {
 test("convertBundledAgents_BundledInventory_Expect_ConvertedAgents", async () => {
   // Arrange
   const original = "# Upgrade Agent\n";
+  const canonical = await readFile(
+    new URL(
+      "../plugins/upgrade-agent/agents/upgrade.agent.md",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const compatibility = await readFile(
+    new URL("../src/copilot-compatibility-instruction.md", import.meta.url),
+    "utf8",
+  );
 
   // Act
   const result = await convertBundledAgents(agentDirectory);
@@ -111,6 +123,12 @@ test("convertBundledAgents_BundledInventory_Expect_ConvertedAgents", async () =>
     "subagent",
   );
   assert.equal(
+    result.agents
+      .filter((agent) => agent.name !== "Upgrade")
+      .every((agent) => agent.mode === "subagent" && agent.hidden),
+    true,
+  );
+  assert.equal(
     result.agents.find((agent) => agent.name === "BuildValidator")?.hidden,
     true,
   );
@@ -121,12 +139,19 @@ test("convertBundledAgents_BundledInventory_Expect_ConvertedAgents", async () =>
   assert.equal(upgrade?.permission["Upgrade_open_dashboard"], "deny");
   assert.equal(upgrade?.permission.open_canvas, "deny");
   assert.equal(upgrade?.permission["*"], "deny");
+  assert.equal(upgrade?.permission.task, "allow");
   assert.equal(
     result.agents.find((agent) => agent.name === "BuildValidator")?.permission
       .webfetch,
     undefined,
   );
   assert.equal(upgrade?.system.startsWith(original), true);
+  assert.equal(canonical.includes("one long-wait `read_agent`"), true);
+  assert.equal(upgrade?.system.endsWith(compatibility), true);
+  assert.ok(
+    upgrade!.system.indexOf("one long-wait `read_agent`") <
+      upgrade!.system.indexOf("This supersedes any preceding background"),
+  );
   assert.equal(upgrade?.system.includes("Upgrade_<tool>"), true);
   assert.equal(
     upgrade?.system.includes(
@@ -143,4 +168,12 @@ test("convertBundledAgents_BundledInventory_Expect_ConvertedAgents", async () =>
     true,
   );
   assert.equal(upgrade?.system.includes("Skip/user-decision path"), true);
+  assert.equal(
+    result.agents.every((agent) =>
+      agent.system.includes(
+        "task` returns the worker result directly and synchronously. Never call or poll `read_agent`",
+      ),
+    ),
+    true,
+  );
 });

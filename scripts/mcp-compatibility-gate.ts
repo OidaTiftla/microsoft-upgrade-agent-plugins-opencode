@@ -1,184 +1,48 @@
-import { cp, mkdtemp, rm } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { access, cp, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import type { ToolContext } from "@opencode-ai/plugin";
 
 import {
   createCoreMcpProcessDefinition,
   loadMcpVersionManifest,
   writeHostDiscoveryFiles,
-  type McpProcessDefinition,
 } from "../src/mcp-process-definitions.ts";
 import { diagnoseMcpPrerequisites } from "../src/mcp-prerequisites.ts";
+import {
+  createOpenCodeMcpToolBridge,
+  primeRepositoryTraits,
+  type McpToolBridge,
+} from "../src/opencode-mcp-tool-bridge.ts";
+import { createPrivateCoreMcpClient } from "../src/private-core-mcp-client.ts";
 
-type McpTool = Awaited<ReturnType<Client["listTools"]>>["tools"][number];
 type ToolArguments = Record<string, string | string[]>;
+
+interface BridgeFixtureResult {
+  readonly artifactCreated: boolean;
+  readonly bridgeToolCount: number;
+  readonly concurrentContextObserved: boolean;
+  readonly instructions: readonly string[];
+  readonly modelSchemaCount: number;
+  readonly notifications: number;
+  readonly progressNotifications: number;
+  readonly rootBound: boolean;
+  readonly scenarios?: string;
+  readonly toolNames: readonly string[];
+}
 
 const pluginRoot = resolve(
   fileURLToPath(new URL("../plugins/upgrade-agent/", import.meta.url)),
 );
 const workspaceRoot = fileURLToPath(new URL("../", import.meta.url));
-const mcpWorkingDirectory = process.env.HOME ?? homedir();
-const proxiedToolNames = [
-  "get_dotnet_upgrade_options",
-  "typescript_scan_dependencies",
-];
-
-function withinTimeout<T>(
-  operation: Promise<T>,
-  timeout_ms: number,
-  name: string,
-): Promise<T> {
-  let timeout: NodeJS.Timeout | undefined;
-  const timeoutError = new Promise<never>((_, reject) => {
-    timeout = setTimeout(
-      () => reject(new Error(`${name} timed out after ${timeout_ms}ms.`)),
-      timeout_ms,
-    );
-  });
-  return Promise.race([operation, timeoutError]).finally(() =>
-    clearTimeout(timeout),
-  );
-}
-
-function getProcessEnvironment(): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(process.env).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
-    ),
-  );
-}
-
-function getTool(tools: readonly McpTool[], name: string): McpTool {
-  const tool = tools.find((candidate) => candidate.name === name);
-  if (tool === undefined) {
-    throw new Error(`MCP tool ${name} was not found.`);
-  }
-  return tool;
-}
-
-function getToolArguments(tool: McpTool, values: ToolArguments): ToolArguments {
-  const schema = tool.inputSchema as {
-    properties?: unknown;
-    required?: unknown;
-  };
-  const properties = schema.properties;
-  if (properties === undefined && Object.keys(values).length === 0) {
-    return {};
-  }
-  if (properties === null || typeof properties !== "object") {
-    throw new Error(
-      `${tool.name} has invalid input schema: ${JSON.stringify(tool.inputSchema)}`,
-    );
-  }
-  const arguments_ = Object.fromEntries(
-    Object.entries(values).filter(([name]) => name in properties),
-  );
-  const required = Array.isArray(schema.required) ? schema.required : [];
-  if (
-    required.some((name) => typeof name !== "string" || !(name in arguments_))
-  ) {
-    throw new Error(
-      `${tool.name} requires unsupported inputs: ${JSON.stringify(tool.inputSchema)}`,
-    );
-  }
-  return arguments_;
-}
-
-function wait(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-function isError(result: unknown): boolean {
-  return (
-    result !== null &&
-    typeof result === "object" &&
-    "isError" in result &&
-    result.isError === true
-  );
-}
+const EXPECTED_BRIDGE_TOOL_COUNTS = { dotnet: 30, typescript: 40 };
 
 function contains(result: unknown, expected: string): boolean {
-  const content = JSON.stringify(result);
+  const content = JSON.stringify(result) ?? "";
   return (
     content.includes(expected) && !/not found|no skills found/i.test(content)
-  );
-}
-
-function summarize(result: unknown): string {
-  const value = JSON.stringify(result);
-  return value.length > 500 ? `${value.slice(0, 500)}...` : value;
-}
-
-async function connectMcp(definition: McpProcessDefinition): Promise<Client> {
-  const client = new Client({
-    name: "opencode-upgrade-agent-compatibility-gate",
-    version: "0.0.0",
-  });
-  const transport = new StdioClientTransport({
-    command: definition.command,
-    args: [...definition.args],
-    env: { ...getProcessEnvironment(), ...definition.env },
-    cwd: mcpWorkingDirectory,
-    stderr: "inherit",
-  });
-  await withinTimeout(
-    client.connect(transport),
-    definition.timeout_ms,
-    definition.name,
-  );
-  return client;
-}
-
-async function withCore<T>(
-  definition: McpProcessDefinition,
-  action: (client: Client) => Promise<T>,
-): Promise<T> {
-  const client = await connectMcp(definition);
-  try {
-    return await action(client);
-  } finally {
-    await client.close();
-  }
-}
-
-async function waitForTools(
-  client: Client,
-  requiredToolNames: readonly string[],
-): Promise<readonly McpTool[]> {
-  let lastTools: readonly McpTool[] = [];
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const tools = (await client.listTools()).tools;
-    lastTools = tools;
-    if (
-      requiredToolNames.every((name) =>
-        tools.some((tool) => tool.name === name),
-      )
-    ) {
-      return tools;
-    }
-    await wait(1_000);
-  }
-  throw new Error(
-    `Core did not proxy ${requiredToolNames.join(", ")}: ${lastTools.map((tool) => tool.name).join(", ")}`,
-  );
-}
-
-async function callTool(
-  client: Client,
-  tool: McpTool,
-  values: ToolArguments,
-): Promise<Awaited<ReturnType<Client["callTool"]>>> {
-  return withinTimeout(
-    client.callTool({
-      name: tool.name,
-      arguments: getToolArguments(tool, values),
-    }),
-    60_000,
-    tool.name,
   );
 }
 
@@ -200,101 +64,187 @@ async function withFixture<T>(
   }
 }
 
-async function getFixtureState(
-  client: Client,
-  fixturePath: string,
-  requiredToolNames: readonly string[],
-): Promise<{
-  readonly state: Awaited<ReturnType<Client["callTool"]>>;
-  readonly tools: readonly McpTool[];
-}> {
-  const state = await callTool(
-    client,
-    getTool((await client.listTools()).tools, "get_state"),
-    { path: fixturePath },
-  );
-  return { state, tools: await waitForTools(client, requiredToolNames) };
+function createToolContext(
+  directory: string,
+  sessionID: string,
+  progress: unknown[],
+): ToolContext {
+  return {
+    abort: new AbortController().signal,
+    agent: "CompatibilityGate",
+    ask: async () => undefined,
+    directory,
+    messageID: `${sessionID}-message`,
+    metadata: (value) => progress.push({ sessionID, value }),
+    sessionID,
+    worktree: directory,
+  };
 }
 
-async function runDotnetFixture(
-  definition: McpProcessDefinition,
-): Promise<Record<string, unknown>> {
-  return withFixture("dotnet-framework-upgrade", async (fixturePath) =>
-    withCore(definition, async (core) => {
-      const { state, tools } = await getFixtureState(core, fixturePath, [
-        "get_dotnet_upgrade_options",
-      ]);
-      const scenarios = await callTool(
-        core,
-        getTool(tools, "get_scenarios"),
-        {},
-      );
-      const instructions = await callTool(
-        core,
-        getTool(tools, "get_instructions"),
-        { kind: "scenario", query: "dotnet-version-upgrade" },
-      );
-      const options = await callTool(
-        core,
-        getTool(tools, "get_dotnet_upgrade_options"),
-        {
-          solutionPath: join(fixturePath, "FrameworkUpgradeFixture.sln"),
-          projectPath: "",
-          targetFramework: "",
-        },
-      );
-      return {
-        sequence: [
-          "get_state",
-          "get_scenarios",
-          "get_instructions",
-          "get_dotnet_upgrade_options",
-        ],
-        state,
-        scenarios,
-        instructions,
-        options,
-        artifactsCreated: [],
-      };
-    }),
-  );
+async function executeBridgeTool(
+  bridge: McpToolBridge,
+  name: string,
+  arguments_: ToolArguments,
+  context: ToolContext,
+): Promise<{ readonly output: string; readonly title: string }> {
+  const definition = bridge.tools[`Upgrade_${name}`];
+  if (definition === undefined)
+    throw new Error(`Bridge did not expose Upgrade_${name}.`);
+  const result = await definition.execute(arguments_, context);
+  if (
+    result === null ||
+    typeof result !== "object" ||
+    typeof (result as { output?: unknown }).output !== "string" ||
+    typeof (result as { title?: unknown }).title !== "string"
+  )
+    throw new Error(
+      `Bridge tool Upgrade_${name} did not return an OpenCode result.`,
+    );
+  return result as { readonly output: string; readonly title: string };
 }
 
-async function runTypescriptFixture(
-  definition: McpProcessDefinition,
-): Promise<Record<string, unknown>> {
-  return withFixture("typescript-compiler-upgrade", async (fixturePath) =>
-    withCore(definition, async (core) => {
-      const { state, tools } = await getFixtureState(core, fixturePath, [
-        "typescript_scan_dependencies",
-      ]);
-      const instructions = await callTool(
-        core,
-        getTool(tools, "get_instructions"),
-        { kind: "skill", query: "typescript-compiler-upgrade" },
-      );
-      const scan = await callTool(
-        core,
-        getTool(tools, "typescript_scan_dependencies"),
-        {
-          rootDirectory: fixturePath,
-          requestedPackages: ["typescript"],
-          skill: "typescript-compiler-upgrade",
+async function assertBundledResource(path: string): Promise<void> {
+  const resolved = resolve(path);
+  const relativePath = relative(pluginRoot, resolved);
+  if (relativePath === "" || relativePath.startsWith(".."))
+    throw new Error(`Bundled resource escaped trusted plugin root: ${path}`);
+  await access(resolved);
+}
+
+async function runBridgeFixture(input: {
+  readonly artifactPath?: string;
+  readonly extenderArguments: (fixturePath: string) => ToolArguments;
+  readonly extenderTool: string;
+  readonly fixture: string;
+  readonly instructions: readonly {
+    readonly kind: string;
+    readonly query: string;
+  }[];
+  readonly resources: readonly string[];
+  readonly scenario?: string;
+  readonly expectedContent: string;
+}): Promise<BridgeFixtureResult> {
+  return withFixture(input.fixture, async (fixturePath) => {
+    const core = await createPrivateCoreMcpClient({
+      pluginRoot,
+      projectRoot: fixturePath,
+      sampling: async () => {
+        throw new Error("Compatibility gate must not request sampling.");
+      },
+      versionManifestPath: new URL("../src/mcp-versions.json", import.meta.url),
+      wrapperPath: fileURLToPath(
+        new URL("../src/dnx-wrapper.mjs", import.meta.url),
+      ),
+    });
+    let notifications = 0;
+    const unsubscribe = core.subscribeToToolListChanges(() => {
+      notifications += 1;
+    });
+    try {
+      await primeRepositoryTraits(core, fixturePath);
+      const bridge = await createOpenCodeMcpToolBridge(core, "Upgrade", {
+        sample: async () => {
+          throw new Error("Compatibility gate must not request sampling.");
         },
+      });
+      const modelSchemas = await Promise.all(
+        Object.keys(bridge.tools).map(async (toolID) => {
+          const output = { description: "", parameters: {} } as {
+            description: string;
+            jsonSchema?: unknown;
+            parameters: unknown;
+          };
+          await bridge.toolDefinition({ toolID }, output);
+          if (output.jsonSchema === undefined)
+            throw new Error(`${toolID} did not expose an MCP JSON Schema.`);
+          return output.jsonSchema;
+        }),
       );
+      const modelSchemaCount = modelSchemas.length;
+      const progress: unknown[] = [];
+      const context = createToolContext(fixturePath, input.fixture, progress);
+      const scenarios =
+        input.scenario === undefined
+          ? undefined
+          : await executeBridgeTool(bridge, "get_scenarios", {}, context);
+      const state = await executeBridgeTool(
+        bridge,
+        "get_state",
+        { path: fixturePath },
+        context,
+      );
+      const extender = await executeBridgeTool(
+        bridge,
+        input.extenderTool,
+        input.extenderArguments(fixturePath),
+        context,
+      );
+      const instructions = await Promise.all(
+        input.instructions.map(({ kind, query }) =>
+          executeBridgeTool(
+            bridge,
+            "get_instructions",
+            { kind, query },
+            context,
+          ),
+        ),
+      );
+      const concurrent = await Promise.all(
+        ["first", "second"].map((sessionID) =>
+          executeBridgeTool(
+            bridge,
+            "get_state",
+            { path: fixturePath },
+            createToolContext(fixturePath, sessionID, progress),
+          ),
+        ),
+      );
+      for (const resource of input.resources)
+        await assertBundledResource(join(pluginRoot, resource));
+      if (
+        state.title !== "Upgrade_get_state" ||
+        extender.title !== `Upgrade_${input.extenderTool}`
+      )
+        throw new Error(
+          `${input.fixture} bridge returned an incomplete OpenCode result.`,
+        );
+      if (
+        !contains(extender.output, input.expectedContent) ||
+        !instructions.every(({ output }) => output.includes("<skill")) ||
+        !concurrent.every(({ title }) => title === "Upgrade_get_state")
+      )
+        throw new Error(
+          `${input.fixture} bridge content or concurrent execution failed.`,
+        );
       return {
-        sequence: [
-          "get_state",
-          "get_instructions",
-          "typescript_scan_dependencies",
-        ],
-        state,
-        instructions,
-        scan,
-        artifactsCreated: [".tsupgrader/PROGRESS.md"],
+        artifactCreated:
+          input.artifactPath === undefined
+            ? true
+            : await access(join(fixturePath, input.artifactPath))
+                .then(() => true)
+                .catch(() => false),
+        bridgeToolCount: Object.keys(bridge.tools).length,
+        concurrentContextObserved: ["first", "second"].every((sessionID) =>
+          progress.some(
+            (entry) =>
+              entry !== null &&
+              typeof entry === "object" &&
+              (entry as { sessionID?: unknown }).sessionID === sessionID,
+          ),
+        ),
+        instructions: instructions.map(({ output }) => output),
+        modelSchemaCount,
+        notifications,
+        progressNotifications: progress.length,
+        rootBound: extender.output.includes(fixturePath),
+        scenarios: scenarios?.output,
+        toolNames: Object.keys(bridge.tools).sort(),
       };
-    }),
-  );
+    } finally {
+      unsubscribe();
+      await core.dispose();
+    }
+  });
 }
 
 async function runCompatibilityGate(): Promise<void> {
@@ -315,29 +265,118 @@ async function runCompatibilityGate(): Promise<void> {
       hostDir,
       pluginRoot,
     });
-    const dotnet = await runDotnetFixture(definition);
-    const typescript = await runTypescriptFixture(definition);
+    const [dotnet, typescript] = await Promise.all([
+      runBridgeFixture({
+        expectedContent: "net10.0",
+        extenderArguments: (fixturePath) => ({
+          projectPath: "",
+          solutionPath: join(fixturePath, "FrameworkUpgradeFixture.sln"),
+          targetFramework: "",
+        }),
+        extenderTool: "get_dotnet_upgrade_options",
+        fixture: "dotnet-framework-upgrade",
+        instructions: [
+          { kind: "scenario", query: "dotnet-version-upgrade" },
+          { kind: "skill", query: "migrating-csharp-nullable-references" },
+        ],
+        resources: [
+          "extenders/upgrade-dotnet/upgrade/skills/lazy/common/migrating-csharp-nullable-references/scripts/Get-NullableReadiness.ps1",
+        ],
+        scenario: "dotnet-version-upgrade",
+      }),
+      runBridgeFixture({
+        artifactPath: ".tsupgrader/PROGRESS.md",
+        expectedContent: "typeScriptMigrationNeeded",
+        extenderArguments: (fixturePath) => ({
+          requestedPackages: ["typescript"],
+          rootDirectory: fixturePath,
+          skill: "typescript-compiler-upgrade",
+        }),
+        extenderTool: "typescript_scan_dependencies",
+        fixture: "typescript-compiler-upgrade",
+        instructions: [
+          { kind: "skill", query: "typescript-compiler-upgrade" },
+          { kind: "skill", query: "typescript-dependencies-upgrade" },
+        ],
+        resources: [
+          "extenders/upgrade-typescript/upgrade/skills/typescript-compiler-upgrade/compiler-upgrade.md",
+          "extenders/upgrade-typescript/upgrade/skills/typescript-dependencies-upgrade/upgrade-packages.md",
+        ],
+      }),
+    ]);
     const diagnostics = {
       coreInstances: 2,
       hostExtendersPath: files.hostExtendersPath,
       telemetryOptOut: definition.env.APPMOD_DISABLE_TELEMETRY,
-      dotnet: Object.fromEntries(
-        Object.entries(dotnet).map(([name, value]) => [name, summarize(value)]),
-      ),
-      typescript: Object.fromEntries(
-        Object.entries(typescript).map(([name, value]) => [
-          name,
-          summarize(value),
-        ]),
-      ),
+      schemaCompatibility: {
+        dotnet: dotnet.bridgeToolCount,
+        typescript: typescript.bridgeToolCount,
+      },
+      dotnet: {
+        artifactCreated: dotnet.artifactCreated,
+        bridgeExtender: dotnet.toolNames.includes(
+          "Upgrade_get_dotnet_upgrade_options",
+        ),
+        concurrentContextObserved: dotnet.concurrentContextObserved,
+        isolatedExtender:
+          !dotnet.toolNames.includes("Upgrade_typescript_scan_dependencies") &&
+          !dotnet.instructions.some((output) =>
+            output.includes("typescript-compiler-upgrade"),
+          ),
+        lazyReference: dotnet.instructions.some((output) =>
+          output.includes("Get-NullableReadiness.ps1"),
+        ),
+        notifications: dotnet.notifications,
+        progressNotifications: dotnet.progressNotifications,
+        rootBound: dotnet.rootBound,
+      },
+      typescript: {
+        artifactCreated: typescript.artifactCreated,
+        bridgeExtender: typescript.toolNames.includes(
+          "Upgrade_typescript_scan_dependencies",
+        ),
+        concurrentContextObserved: typescript.concurrentContextObserved,
+        isolatedExtender: !typescript.instructions.some((output) =>
+          output.includes("dotnet-version-upgrade"),
+        ),
+        guidanceReference: typescript.instructions.some((output) =>
+          output.includes("compiler-upgrade.md"),
+        ),
+        notifications: typescript.notifications,
+        progressNotifications: typescript.progressNotifications,
+        rootBound: typescript.rootBound,
+      },
     };
     console.log(JSON.stringify(diagnostics));
     if (
+      !dotnet.artifactCreated ||
+      !typescript.artifactCreated ||
+      dotnet.bridgeToolCount !== EXPECTED_BRIDGE_TOOL_COUNTS.dotnet ||
+      typescript.bridgeToolCount !== EXPECTED_BRIDGE_TOOL_COUNTS.typescript ||
+      dotnet.modelSchemaCount !== EXPECTED_BRIDGE_TOOL_COUNTS.dotnet ||
+      typescript.modelSchemaCount !== EXPECTED_BRIDGE_TOOL_COUNTS.typescript ||
       !contains(dotnet.scenarios, "dotnet-version-upgrade") ||
-      !contains(dotnet.instructions, "dotnet-version-upgrade") ||
-      isError(dotnet.options) ||
-      !contains(typescript.instructions, "typescript-compiler-upgrade") ||
-      isError(typescript.scan)
+      !dotnet.rootBound ||
+      !typescript.rootBound ||
+      dotnet.notifications <= 0 ||
+      typescript.notifications <= 0 ||
+      dotnet.progressNotifications <= 0 ||
+      typescript.progressNotifications <= 0 ||
+      !dotnet.concurrentContextObserved ||
+      !typescript.concurrentContextObserved ||
+      dotnet.toolNames.includes("Upgrade_typescript_scan_dependencies") ||
+      !dotnet.instructions.every(
+        (output) => !output.includes("typescript-compiler-upgrade"),
+      ) ||
+      !typescript.instructions.every(
+        (output) => !output.includes("dotnet-version-upgrade"),
+      ) ||
+      !dotnet.instructions.some((output) =>
+        output.includes("Get-NullableReadiness.ps1"),
+      ) ||
+      !typescript.instructions.some((output) =>
+        output.includes("compiler-upgrade.md"),
+      )
     ) {
       throw new Error("MCP routing failed; see the diagnostic summary above.");
     }

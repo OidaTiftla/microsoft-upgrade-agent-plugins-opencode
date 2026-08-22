@@ -1,45 +1,28 @@
 import assert from "node:assert/strict";
-import {
-  access,
-  mkdtemp,
-  mkdir,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import type { Config } from "@opencode-ai/plugin";
+import {
+  tool,
+  type Config,
+  type Hooks,
+  type PluginInput,
+} from "@opencode-ai/plugin";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 import type { AgentConversionResult } from "../src/agent-converter.ts";
 import * as packageEntry from "../src/index.ts";
-import { createUpgradeAgentPlugin } from "../src/upgrade-agent-plugin.ts";
 import {
-  createCoreMcpLifecycle,
-  registerCoreMcp,
-} from "../src/opencode-core-mcp.ts";
-
-const manifest = {
-  core: { package: "Microsoft.GitHubCopilot.Upgrade.Mcp", version: "1.1.441" },
-  dotnet: {
-    package: "Microsoft.GitHubCopilot.Upgrade.DotNet.Mcp",
-    version: "1.1.441",
-  },
-  typescript: {
-    package: "@microsoft/jsts-upgrade-assistant",
-    version: "0.1.6",
-  },
-};
-
-const definition = {
-  name: "Upgrade" as const,
-  command: "dnx" as const,
-  args: ["Microsoft.GitHubCopilot.Upgrade.Mcp@1.1.441", "--yes"],
-  env: { APPMOD_DISABLE_TELEMETRY: "true" },
-  timeout_ms: 300000,
-};
+  createUpgradeAgentPlugin,
+  getPluginOptions,
+  type UpgradeAgentPluginDependencies,
+  type UpgradeAgentPluginRuntime,
+} from "../src/upgrade-agent-plugin.ts";
+import type {
+  PrivateCoreMcpClient,
+  SamplingCallback,
+} from "../src/private-core-mcp-client.ts";
+import { getMcpStartupRequestOptions } from "../src/private-core-mcp-client.ts";
 
 const convertedAgents: AgentConversionResult = {
   agents: [
@@ -56,6 +39,53 @@ const convertedAgents: AgentConversionResult = {
   diagnostics: [],
 };
 
+function runtime(): UpgradeAgentPluginRuntime {
+  return { client: {} as PluginInput["client"], directory: "/workspace" };
+}
+
+function samplingPermission(permission: unknown): unknown {
+  return (permission as Record<string, unknown> | undefined)?.sampling;
+}
+
+function privateClient(disposed: { value: boolean }): PrivateCoreMcpClient {
+  return {
+    callTool: async () => ({ content: [] }),
+    client: {} as Client,
+    dispose: async () => {
+      disposed.value = true;
+    },
+    listTools: async () => ({ tools: [] }) as never,
+    subscribeToToolListChanges: () => () => undefined,
+  };
+}
+
+function dependencies(input: {
+  disposed: { value: boolean };
+  sampling?: { value: SamplingCallback | undefined };
+  toolDefinition?: NonNullable<Hooks["tool.definition"]>;
+}): UpgradeAgentPluginDependencies {
+  return {
+    createBridge: async (_client, coordinator) => ({
+      coordinator,
+      toolDefinition: input.toolDefinition ?? (async () => undefined),
+      tools: {
+        Upgrade_get_state: tool({
+          args: {},
+          description: "Get upgrade state.",
+          execute: async () => "state",
+        }),
+      },
+    }),
+    convertAgents: async () => convertedAgents,
+    createPrivateClient: async (_directory, sampling) => {
+      if (input.sampling !== undefined) input.sampling.value = sampling;
+      return privateClient(input.disposed);
+    },
+    diagnose: async () => ({ isReady: true, diagnostics: [] }),
+    warn: () => undefined,
+  };
+}
+
 test("packageEntry_Exports_Expect_DefaultPluginOnly", async () => {
   // Arrange
   const packageJson = JSON.parse(
@@ -71,192 +101,312 @@ test("packageEntry_Exports_Expect_DefaultPluginOnly", async () => {
   assert.equal(typeof packageEntry.default, "function");
 });
 
-test("registerCoreMcp_ExistingConfiguration_Expect_MergedCoreServer", () => {
+test("getPluginOptions_MissingSampling_Expect_AskPolicy", () => {
   // Arrange
-  const config: Config = {
-    mcp: { Existing: { type: "local", command: ["existing"] } },
-  };
+  const options = {};
 
   // Act
-  registerCoreMcp(config, definition, "/wrapper.mjs");
+  const result = getPluginOptions(options);
 
   // Assert
-  assert.deepEqual(config.mcp, {
-    Existing: { type: "local", command: ["existing"] },
-    Upgrade: {
-      type: "local",
-      command: [
-        "node",
-        "/wrapper.mjs",
-        "dnx",
-        "Microsoft.GitHubCopilot.Upgrade.Mcp@1.1.441",
-        "--yes",
-      ],
-      environment: { APPMOD_DISABLE_TELEMETRY: "true" },
-      timeout: 300000,
-    },
-  });
+  assert.deepEqual(result, { sampling: "ask" });
 });
 
-test("registerCoreMcp_ConflictingKey_Expect_ThrowsException", () => {
+test("getPluginOptions_InvalidSampling_Expect_ThrowsException", () => {
   // Arrange
-  const config: Config = {
-    mcp: { Upgrade: { type: "local", command: ["existing"] } },
-  };
+  const options = { sampling: "always" };
 
   // Act
-  const action = () => registerCoreMcp(config, definition, "/wrapper.mjs");
+  const action = () => getPluginOptions(options);
 
   // Assert
-  assert.throws(action, /MCP key "Upgrade" is already configured/);
+  assert.throws(action, /sampling.*ask.*allow.*deny/);
 });
 
-test("createCoreMcpLifecycle_ActiveLifecycle_Expect_GeneratedFilesRemovedOnDispose", async () => {
+test("getPluginOptions_UnknownOption_Expect_ThrowsException", () => {
   // Arrange
-  const root = await mkdtemp(join(tmpdir(), "opencode-plugin-"));
-  const pluginRoot = join(root, "plugins", "upgrade-agent");
-  const versionManifestPath = join(root, "mcp-versions.json");
-  try {
-    await writeFile(versionManifestPath, JSON.stringify(manifest));
-    for (const [id, packageName] of [
-      ["upgrade-dotnet", manifest.dotnet.package],
-      ["upgrade-typescript", manifest.typescript.package],
-    ] as const) {
-      const path = join(pluginRoot, "extenders", id, "upgrade-extension.json");
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(
-        path,
-        JSON.stringify({
-          mcp: {
-            args: id === "upgrade-dotnet" ? [packageName] : ["-y", packageName],
-          },
-        }),
-      );
-    }
+  const options = { unsupported: true };
 
-    // Act
-    const lifecycle = await createCoreMcpLifecycle({
-      pluginRoot,
-      versionManifestPath,
-      wrapperPath: "/wrapper.mjs",
-    });
-    const config: Config = {};
-    lifecycle.config(config);
-    const core = config.mcp?.Upgrade;
-    const hostDir =
-      core?.type === "local" ? core.environment?.APPMOD_HOST_DIR : undefined;
-    await lifecycle.dispose();
+  // Act
+  const action = () => getPluginOptions(options);
 
-    // Assert
-    assert.equal(typeof hostDir, "string");
-    await assert.rejects(access(hostDir!));
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
+  // Assert
+  assert.throws(action, /Unknown Upgrade plugin option/);
+});
+
+test("getMcpStartupRequestOptions_Signal_Expect_ForwardsCancellation", () => {
+  // Arrange
+  const signal = new AbortController().signal;
+
+  // Act
+  const options = getMcpStartupRequestOptions(300_000, signal);
+
+  // Assert
+  assert.deepEqual(options, { signal, timeout: 300_000 });
 });
 
 test("createUpgradeAgentPlugin_MissingPrerequisites_Expect_ActionableError", async () => {
   // Arrange
-  const createLifecycle = async () => {
-    throw new Error("Lifecycle should not be created.");
-  };
-
-  // Act
-  const action = () =>
-    createUpgradeAgentPlugin({
-      diagnose: async () => ({
-        isReady: false,
-        diagnostics: [
-          {
-            prerequisite: "dnx",
-            status: "missing",
-            message: 'Required executable "dnx" was not found on PATH.',
-            remediation: "Install the .NET SDK 10 or later.",
-          },
-        ],
-      }),
-      createLifecycle,
-      convertAgents: async () => convertedAgents,
-      warn: () => undefined,
-    });
-
-  // Assert
-  await assert.rejects(action, /dnx.*Install the .NET SDK 10 or later/s);
-});
-
-test("createUpgradeAgentPlugin_ConfigConflict_Expect_DisposesLifecycleBeforeRegistration", async () => {
-  // Arrange
-  let configured = false;
-  let disposed = false;
-  const plugin = await createUpgradeAgentPlugin({
-    diagnose: async () => ({ isReady: true, diagnostics: [] }),
-    convertAgents: async () => ({
-      ...convertedAgents,
-      agents: [
-        ...convertedAgents.agents,
+  const disposed = { value: false };
+  const input: UpgradeAgentPluginDependencies = {
+    ...dependencies({ disposed }),
+    diagnose: async () => ({
+      isReady: false,
+      diagnostics: [
         {
-          ...convertedAgents.agents[0],
-          id: "build-validator",
-          name: "BuildValidator",
+          prerequisite: "dnx",
+          status: "missing",
+          message: 'Required executable "dnx" was not found on PATH.',
+          remediation: "Install the .NET SDK 10 or later.",
         },
       ],
     }),
-    createLifecycle: async () => ({
-      config: () => {
-        configured = true;
-      },
-      dispose: async () => {
-        disposed = true;
-      },
-    }),
-    warn: () => undefined,
-  });
-  const config: Config = {
-    agent: {
-      Upgrade: { prompt: "existing" },
-      BuildValidator: { prompt: "existing" },
+  };
+
+  // Act
+  const action = () => createUpgradeAgentPlugin(runtime(), {}, input);
+
+  // Assert
+  await assert.rejects(action, /dnx.*Install the .NET SDK 10 or later/);
+  assert.equal(disposed.value, false);
+});
+
+test("createUpgradeAgentPlugin_PrivateBridge_Expect_PrimedDynamicTools", async () => {
+  // Arrange
+  const disposed = { value: false };
+  const sampling = { value: undefined as SamplingCallback | undefined };
+  const calls: unknown[] = [];
+  let initializationSignal: AbortSignal | undefined;
+  const input: UpgradeAgentPluginDependencies = {
+    ...dependencies({ disposed, sampling }),
+    createPrivateClient: async (
+      directory: string,
+      callback: SamplingCallback,
+      signal: AbortSignal,
+    ) => {
+      sampling.value = callback;
+      initializationSignal = signal;
+      const client = privateClient(disposed);
+      client.callTool = async (name, arguments_) => {
+        calls.push({ arguments_, name });
+        return { content: [] };
+      };
+      assert.equal(directory, "/workspace");
+      return client;
     },
   };
 
   // Act
-  const action = () => plugin.config!(config);
+  const plugin = await createUpgradeAgentPlugin(
+    runtime(),
+    { sampling: "allow" },
+    input,
+  );
+  await plugin.config!({});
 
   // Assert
-  await assert.rejects(action, /BuildValidator, Upgrade/);
-  assert.equal(configured, false);
-  assert.equal(disposed, true);
-  assert.equal(config.agent?.TaskExecutor, undefined);
+  assert.deepEqual(calls, [
+    { arguments_: { path: "/workspace" }, name: "get_state" },
+  ]);
+  assert.deepEqual(Object.keys(plugin.tool ?? {}), ["Upgrade_get_state"]);
+  assert.equal(initializationSignal?.aborted, false);
+  await assert.rejects(
+    () =>
+      sampling.value!(
+        {
+          method: "sampling/createMessage",
+          params: { maxTokens: 1, messages: [] },
+        } as never,
+        new AbortController().signal,
+      ),
+    /not associated/,
+  );
 });
 
-test("createUpgradeAgentPlugin_ConversionWarnings_Expect_EmitsOneAggregatedDiagnostic", async () => {
+test("createUpgradeAgentPlugin_ConfigPreflightMcpConflict_Expect_NoPrivateClient", async () => {
   // Arrange
-  const warnings: string[] = [];
-  const plugin = await createUpgradeAgentPlugin({
-    diagnose: async () => ({ isReady: true, diagnostics: [] }),
-    convertAgents: async () => ({
-      ...convertedAgents,
-      diagnostics: [
-        {
-          level: "warning",
-          file: "upgrade.agent.md",
-          property: "metadata",
-          message: "Optional frontmatter property was ignored.",
-        },
-      ],
-    }),
-    createLifecycle: async () => ({
-      config: () => undefined,
-      dispose: async () => undefined,
-    }),
-    warn: (message) => warnings.push(message),
-  });
+  const disposed = { value: false };
+  let privateClientCreated = false;
+  const input: UpgradeAgentPluginDependencies = {
+    ...dependencies({ disposed }),
+    createPrivateClient: async () => {
+      privateClientCreated = true;
+      return privateClient(disposed);
+    },
+  };
 
   // Act
-  await plugin.config!({});
-  await plugin.config!({});
+  const plugin = await createUpgradeAgentPlugin(runtime(), {}, input);
+  const action = () =>
+    plugin.config!({
+      mcp: { Upgrade: { command: ["existing"], type: "local" } },
+    });
 
   // Assert
-  assert.deepEqual(warnings, [
-    "Agent conversion warnings:\n- upgrade.agent.md metadata: Optional frontmatter property was ignored.",
-  ]);
+  await assert.rejects(action, /MCP key "Upgrade"/);
+  assert.equal(privateClientCreated, false);
+  assert.deepEqual(Object.keys(plugin.tool ?? {}), []);
+});
+
+test("createUpgradeAgentPlugin_ConfigPreflightFailure_Expect_DisposedPartialClient", async () => {
+  // Arrange
+  const disposed = { value: false };
+  let privateClientCreated = false;
+  const input: UpgradeAgentPluginDependencies = {
+    ...dependencies({ disposed }),
+    createBridge: async () => {
+      throw new Error("Bridge initialization failed");
+    },
+    createPrivateClient: async () => {
+      privateClientCreated = true;
+      return privateClient(disposed);
+    },
+  };
+  const plugin = await createUpgradeAgentPlugin(runtime(), {}, input);
+
+  // Act
+  const action = () => plugin.config!({});
+
+  // Assert
+  await assert.rejects(action, /Bridge initialization failed/);
+  assert.equal(privateClientCreated, true);
+  assert.equal(disposed.value, true);
+  assert.deepEqual(Object.keys(plugin.tool ?? {}), []);
+});
+
+test("createUpgradeAgentPlugin_Config_Expect_AgentsSamplerAndNoMcpRegistration", async () => {
+  // Arrange
+  const disposed = { value: false };
+  const schema = { type: "object" };
+  const plugin = await createUpgradeAgentPlugin(
+    runtime(),
+    {},
+    dependencies({
+      disposed,
+      toolDefinition: async (_input, output) => {
+        (output as { jsonSchema?: unknown }).jsonSchema = schema;
+      },
+    }),
+  );
+  const config: Config = {
+    agent: {
+      Explicit: {
+        permission: { sampling: "deny" } as never,
+        prompt: "No sampling.",
+      },
+      Unrelated: {
+        permission: { "*": "deny" } as never,
+        prompt: "Ask when needed.",
+      },
+    },
+    mcp: { Existing: { command: ["existing"], type: "local" } },
+    small_model: "provider/small",
+  };
+  const definition = { description: "State", parameters: {} } as {
+    description: string;
+    jsonSchema?: unknown;
+    parameters: unknown;
+  };
+
+  // Act
+  await plugin.config!(config);
+  await plugin["tool.definition"]!({ toolID: "Upgrade_get_state" }, definition);
+
+  // Assert
+  assert.equal(config.mcp?.Existing?.type, "local");
+  assert.equal(config.mcp?.Upgrade, undefined);
+  assert.equal(config.agent?.Upgrade?.prompt, "Upgrade prompt.");
+  assert.equal(samplingPermission(config.permission), "ask");
+  assert.equal(samplingPermission(config.agent?.Upgrade?.permission), "ask");
+  assert.equal(samplingPermission(config.agent?.Unrelated?.permission), "ask");
+  assert.equal(samplingPermission(config.agent?.Explicit?.permission), "deny");
+  assert.equal(config.agent?.UpgradeSampler?.hidden, true);
+  assert.deepEqual(config.agent?.UpgradeSampler?.permission, {
+    "*": "deny",
+    sampling: "ask",
+  });
+  assert.equal(typeof plugin["chat.params"], "function");
+  assert.equal(definition.jsonSchema, schema);
+  assert.equal(disposed.value, false);
+});
+
+test("createUpgradeAgentPlugin_ConcurrentConfig_Expect_SinglePrivateClient", async () => {
+  // Arrange
+  const disposed = { value: false };
+  let privateClientCreated = 0;
+  let release: (() => void) | undefined;
+  const input: UpgradeAgentPluginDependencies = {
+    ...dependencies({ disposed }),
+    createPrivateClient: async () => {
+      privateClientCreated += 1;
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return privateClient(disposed);
+    },
+  };
+  const plugin = await createUpgradeAgentPlugin(runtime(), {}, input);
+
+  // Act
+  const first = plugin.config!({});
+  const second = plugin.config!({});
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  release!();
+  await Promise.all([first, second]);
+
+  // Assert
+  assert.equal(privateClientCreated, 1);
+  assert.deepEqual(Object.keys(plugin.tool ?? {}), ["Upgrade_get_state"]);
+});
+
+test("createUpgradeAgentPlugin_DisposeBeforeConfig_Expect_NoPrivateClient", async () => {
+  // Arrange
+  const disposed = { value: false };
+  let privateClientCreated = false;
+  const input: UpgradeAgentPluginDependencies = {
+    ...dependencies({ disposed }),
+    createPrivateClient: async () => {
+      privateClientCreated = true;
+      return privateClient(disposed);
+    },
+  };
+  const plugin = await createUpgradeAgentPlugin(runtime(), {}, input);
+
+  // Act
+  await plugin.dispose!();
+  const action = () => plugin.config!({});
+
+  // Assert
+  await assert.rejects(action, /disposed before initialization/);
+  assert.equal(privateClientCreated, false);
+  assert.deepEqual(Object.keys(plugin.tool ?? {}), []);
+});
+
+test("createUpgradeAgentPlugin_DisposeDuringStart_Expect_CleansUpClient", async () => {
+  // Arrange
+  const disposed = { value: false };
+  let signal: AbortSignal | undefined;
+  const input: UpgradeAgentPluginDependencies = {
+    ...dependencies({ disposed }),
+    createBridge: async (_client, _coordinator, _sampling, abort) => {
+      signal = abort;
+      return new Promise<never>((_resolve, reject) => {
+        abort.addEventListener("abort", () => reject(abort.reason), {
+          once: true,
+        });
+      });
+    },
+  };
+  const plugin = await createUpgradeAgentPlugin(runtime(), {}, input);
+
+  // Act
+  const config = plugin.config!({});
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const cleanup = plugin.dispose!();
+
+  // Assert
+  await assert.rejects(config, /Upgrade plugin was disposed/);
+  await cleanup;
+  assert.equal(signal?.aborted, true);
+  assert.equal(disposed.value, true);
 });

@@ -1,7 +1,11 @@
 import type { Plugin } from "@opencode-ai/plugin";
 
-import { createUpgradeAgentPlugin } from "./upgrade-agent-plugin.ts";
+import {
+  createUpgradeAgentPlugin,
+  getPluginRuntime,
+} from "./upgrade-agent-plugin.ts";
 
-const UpgradeAgentPlugin: Plugin = async () => createUpgradeAgentPlugin();
+const UpgradeAgentPlugin: Plugin = async (input, options) =>
+  createUpgradeAgentPlugin(getPluginRuntime(input), options);
 
 export default UpgradeAgentPlugin;
