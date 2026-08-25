@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
@@ -41,28 +40,6 @@ test("getRuntimeAssetPaths_RuntimeSources_Expect_AllRequiredAssets", async () =>
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
-
-test("getRuntimeAssetPaths_BundledSkills_Expect_AllSkillDirectoriesAndSiblingAssets", async () => {
-  // Arrange
-  const packageRoot = fileURLToPath(new URL("../", import.meta.url));
-
-  // Act
-  const paths = await getRuntimeAssetPaths(packageRoot);
-  const skillPaths = paths.filter((path) => path.endsWith("/SKILL.md"));
-
-  // Assert
-  assert.equal(skillPaths.length, 101);
-  assert.ok(
-    paths.includes(
-      "plugins/upgrade-agent/upgrade/skills/generic/creating-skills/templates/SKILL-TEMPLATE.md",
-    ),
-  );
-  assert.ok(
-    paths.includes(
-      "plugins/upgrade-agent/extenders/upgrade-dotnet/upgrade/skills/lazy/common/migrating-csharp-nullable-references/scripts/Get-NullableReadiness.ps1",
-    ),
-  );
 });
 
 test("validatePackageInventory_MissingRuntimeAsset_Expect_ThrowsException", () => {

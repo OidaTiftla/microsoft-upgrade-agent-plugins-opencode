@@ -61,7 +61,6 @@ export interface UpgradeAgentPluginDependencies {
   ) => Promise<McpToolBridge>;
   readonly convertAgents: () => Promise<AgentConversionResult>;
   readonly createPrivateClient: (
-    directory: string,
     sampling: SamplingCallback,
     signal: AbortSignal,
   ) => Promise<PrivateCoreMcpClient>;
@@ -85,17 +84,14 @@ function getPrerequisiteError(diagnostics: McpPrerequisiteDiagnostics): Error {
 }
 
 function createDefaultPrivateClient(
-  projectRoot: string,
   sampling: SamplingCallback,
   signal: AbortSignal,
 ): Promise<PrivateCoreMcpClient> {
   return createPrivateCoreMcpClient({
     pluginRoot: BUNDLED_PLUGIN_ROOT,
-    projectRoot,
     sampling,
     signal,
     versionManifestPath: new URL("./mcp-versions.json", import.meta.url),
-    wrapperPath: fileURLToPath(new URL("./dnx-wrapper.mjs", import.meta.url)),
   });
 }
 
@@ -171,7 +167,6 @@ export async function createUpgradeAgentPlugin(
     let coordinator: CoreToolExecutionCoordinator | undefined;
     try {
       client = await dependencies.createPrivateClient(
-        runtime.directory,
         async (request, signal) => {
           if (coordinator === undefined)
             throw new Error(

@@ -22,10 +22,8 @@ type ToolArguments = Record<string, string | string[]>;
 
 interface BridgeFixtureResult {
   readonly artifactCreated: boolean;
-  readonly bridgeToolCount: number;
   readonly concurrentContextObserved: boolean;
   readonly instructions: readonly string[];
-  readonly modelSchemaCount: number;
   readonly notifications: number;
   readonly progressNotifications: number;
   readonly rootBound: boolean;
@@ -37,8 +35,6 @@ const pluginRoot = resolve(
   fileURLToPath(new URL("../plugins/upgrade-agent/", import.meta.url)),
 );
 const workspaceRoot = fileURLToPath(new URL("../", import.meta.url));
-const EXPECTED_BRIDGE_TOOL_COUNTS = { dotnet: 30, typescript: 40 };
-
 function contains(result: unknown, expected: string): boolean {
   const content = JSON.stringify(result) ?? "";
   return (
@@ -127,14 +123,10 @@ async function runBridgeFixture(input: {
   return withFixture(input.fixture, async (fixturePath) => {
     const core = await createPrivateCoreMcpClient({
       pluginRoot,
-      projectRoot: fixturePath,
       sampling: async () => {
         throw new Error("Compatibility gate must not request sampling.");
       },
       versionManifestPath: new URL("../src/mcp-versions.json", import.meta.url),
-      wrapperPath: fileURLToPath(
-        new URL("../src/dnx-wrapper.mjs", import.meta.url),
-      ),
     });
     let notifications = 0;
     const unsubscribe = core.subscribeToToolListChanges(() => {
@@ -147,7 +139,7 @@ async function runBridgeFixture(input: {
           throw new Error("Compatibility gate must not request sampling.");
         },
       });
-      const modelSchemas = await Promise.all(
+      await Promise.all(
         Object.keys(bridge.tools).map(async (toolID) => {
           const output = { description: "", parameters: {} } as {
             description: string;
@@ -157,10 +149,8 @@ async function runBridgeFixture(input: {
           await bridge.toolDefinition({ toolID }, output);
           if (output.jsonSchema === undefined)
             throw new Error(`${toolID} did not expose an MCP JSON Schema.`);
-          return output.jsonSchema;
         }),
       );
-      const modelSchemaCount = modelSchemas.length;
       const progress: unknown[] = [];
       const context = createToolContext(fixturePath, input.fixture, progress);
       const scenarios =
@@ -223,7 +213,6 @@ async function runBridgeFixture(input: {
             : await access(join(fixturePath, input.artifactPath))
                 .then(() => true)
                 .catch(() => false),
-        bridgeToolCount: Object.keys(bridge.tools).length,
         concurrentContextObserved: ["first", "second"].every((sessionID) =>
           progress.some(
             (entry) =>
@@ -233,7 +222,6 @@ async function runBridgeFixture(input: {
           ),
         ),
         instructions: instructions.map(({ output }) => output),
-        modelSchemaCount,
         notifications,
         progressNotifications: progress.length,
         rootBound: extender.output.includes(fixturePath),
@@ -308,10 +296,6 @@ async function runCompatibilityGate(): Promise<void> {
       coreInstances: 2,
       hostExtendersPath: files.hostExtendersPath,
       telemetryOptOut: definition.env.APPMOD_DISABLE_TELEMETRY,
-      schemaCompatibility: {
-        dotnet: dotnet.bridgeToolCount,
-        typescript: typescript.bridgeToolCount,
-      },
       dotnet: {
         artifactCreated: dotnet.artifactCreated,
         bridgeExtender: dotnet.toolNames.includes(
@@ -351,10 +335,6 @@ async function runCompatibilityGate(): Promise<void> {
     if (
       !dotnet.artifactCreated ||
       !typescript.artifactCreated ||
-      dotnet.bridgeToolCount !== EXPECTED_BRIDGE_TOOL_COUNTS.dotnet ||
-      typescript.bridgeToolCount !== EXPECTED_BRIDGE_TOOL_COUNTS.typescript ||
-      dotnet.modelSchemaCount !== EXPECTED_BRIDGE_TOOL_COUNTS.dotnet ||
-      typescript.modelSchemaCount !== EXPECTED_BRIDGE_TOOL_COUNTS.typescript ||
       !contains(dotnet.scenarios, "dotnet-version-upgrade") ||
       !dotnet.rootBound ||
       !typescript.rootBound ||

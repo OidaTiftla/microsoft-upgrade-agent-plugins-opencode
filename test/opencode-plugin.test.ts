@@ -77,7 +77,7 @@ function dependencies(input: {
       },
     }),
     convertAgents: async () => convertedAgents,
-    createPrivateClient: async (_directory, sampling) => {
+    createPrivateClient: async (sampling) => {
       if (input.sampling !== undefined) input.sampling.value = sampling;
       return privateClient(input.disposed);
     },
@@ -180,7 +180,6 @@ test("createUpgradeAgentPlugin_PrivateBridge_Expect_PrimedDynamicTools", async (
   const input: UpgradeAgentPluginDependencies = {
     ...dependencies({ disposed, sampling }),
     createPrivateClient: async (
-      directory: string,
       callback: SamplingCallback,
       signal: AbortSignal,
     ) => {
@@ -191,7 +190,6 @@ test("createUpgradeAgentPlugin_PrivateBridge_Expect_PrimedDynamicTools", async (
         calls.push({ arguments_, name });
         return { content: [] };
       };
-      assert.equal(directory, "/workspace");
       return client;
     },
   };

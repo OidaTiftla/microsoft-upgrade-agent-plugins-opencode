@@ -242,14 +242,10 @@ async function main(): Promise<void> {
     );
     const core = await createPrivateCoreMcpClient({
       pluginRoot,
-      projectRoot: fixture,
       sampling: async () => {
         throw new Error("E2E setup unexpectedly requested sampling.");
       },
       versionManifestPath: new URL("../src/mcp-versions.json", import.meta.url),
-      wrapperPath: fileURLToPath(
-        new URL("../src/dnx-wrapper.mjs", import.meta.url),
-      ),
     });
     try {
       await core.callTool("get_state", { path: fixture });

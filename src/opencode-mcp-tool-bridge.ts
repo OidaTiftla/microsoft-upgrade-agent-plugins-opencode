@@ -9,8 +9,6 @@ import type {
   CreateMessageResult,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { combineAbortSignals } from "./abort-signal.ts";
-
 export interface McpTool {
   readonly description?: string;
   readonly inputSchema: unknown;
@@ -155,15 +153,10 @@ export class CoreToolExecutionCoordinator {
       throw new Error(
         "MCP sampling request is not associated with an active tool call.",
       );
-    const cancellation = combineAbortSignals([context.abort, signal]);
-    try {
-      return await this.#sampling.sample(request, {
-        ...context,
-        abort: cancellation.signal,
-      });
-    } finally {
-      cancellation.dispose();
-    }
+    return this.#sampling.sample(request, {
+      ...context,
+      abort: AbortSignal.any([context.abort, signal]),
+    });
   }
 }
 

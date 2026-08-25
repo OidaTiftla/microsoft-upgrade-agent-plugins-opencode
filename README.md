@@ -70,7 +70,6 @@ npm test # executes the following tests:
 # npm run test:integration
 # npm run test:opencode
 # npm run test:package
-npm run pack:dry-run
 ```
 
 ## Manual credentialed sampling gate

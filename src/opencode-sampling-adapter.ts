@@ -5,7 +5,6 @@ import type {
   CreateMessageResult,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { combineAbortSignals } from "./abort-signal.ts";
 import { SAMPLING_AGENT_NAME } from "./sampling-agent.ts";
 
 export type SamplingPolicy = "ask" | "allow" | "deny";
@@ -323,7 +322,7 @@ export class OpenCodeSamplingAdapter {
     const cancellationSignals = [context.abort, mcpAbort].filter(
       (signal): signal is AbortSignal => signal !== undefined,
     );
-    const combinedAbort = combineAbortSignals(cancellationSignals);
+    const combinedAbort = AbortSignal.any(cancellationSignals);
     const prompt = getSamplingPrompt(request);
     const stopSequences = getStopSequences(request);
     let child: { id: string } | undefined;
@@ -339,16 +338,16 @@ export class OpenCodeSamplingAdapter {
           .then(() => undefined);
       }
     };
-    combinedAbort.signal.addEventListener("abort", abort, { once: true });
+    combinedAbort.addEventListener("abort", abort, { once: true });
     try {
-      throwIfAborted(combinedAbort.signal);
+      throwIfAborted(combinedAbort);
       const parentModel = getParentModel(
         await this.#client.session.messages({
           path: { id: context.sessionID },
           query: { directory: context.directory },
         }),
       );
-      throwIfAborted(combinedAbort.signal);
+      throwIfAborted(combinedAbort);
       const model = getRequestedModel(
         request,
         getModel(this.#getSmallModel?.()),
@@ -363,7 +362,7 @@ export class OpenCodeSamplingAdapter {
           metadata: getSamplingApprovalMetadata(request, this.#mcpName, model),
         });
       }
-      throwIfAborted(combinedAbort.signal);
+      throwIfAborted(combinedAbort);
       child = await this.#client.session.create({
         body: { parentID: context.sessionID, title: "Upgrade MCP sampling" },
         query: { directory: context.directory },
@@ -372,7 +371,7 @@ export class OpenCodeSamplingAdapter {
         maxTokens: request.params.maxTokens,
         temperature: request.params.temperature,
       });
-      throwIfAborted(combinedAbort.signal);
+      throwIfAborted(combinedAbort);
       const response = await this.#client.session.prompt({
         path: { id: child.id },
         query: { directory: context.directory },
@@ -385,7 +384,7 @@ export class OpenCodeSamplingAdapter {
           tools: {},
         },
       });
-      throwIfAborted(combinedAbort.signal);
+      throwIfAborted(combinedAbort);
       throwIfAssistantError(response.info);
       throwIfOutputTokenLimitExceeded(response.info, request.params.maxTokens);
       const result: CreateMessageResult = {
@@ -407,8 +406,7 @@ export class OpenCodeSamplingAdapter {
       completed = true;
       return result;
     } finally {
-      combinedAbort.signal.removeEventListener("abort", abort);
-      combinedAbort.dispose();
+      combinedAbort.removeEventListener("abort", abort);
       const childID = child?.id;
       if (childID !== undefined) this.#samplingParameters.delete(childID);
       const cleanupError = await getCleanupError(

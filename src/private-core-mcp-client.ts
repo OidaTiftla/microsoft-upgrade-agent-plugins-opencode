@@ -1,5 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -19,10 +19,8 @@ import type { CoreMcpToolRequestOptions } from "./opencode-mcp-tool-bridge.ts";
 
 export interface PrivateCoreMcpClientOptions {
   readonly pluginRoot: string;
-  readonly projectRoot: string;
   readonly signal?: AbortSignal;
   readonly versionManifestPath: URL | string;
-  readonly wrapperPath: string;
   readonly sampling: SamplingCallback;
 }
 
@@ -114,10 +112,10 @@ export async function createPrivateCoreMcpClient(
     );
     await connectedClient.connect(
       new StdioClientTransport({
-        command: "node",
-        args: [options.wrapperPath, definition.command, ...definition.args],
+        command: definition.command,
+        args: [...definition.args],
         env: definition.env,
-        cwd: options.projectRoot,
+        cwd: homedir(),
         stderr: "inherit",
       }),
       getMcpStartupRequestOptions(definition.timeout_ms, options.signal),
