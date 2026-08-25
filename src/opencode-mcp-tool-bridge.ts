@@ -251,15 +251,22 @@ export function createOpenCodeMcpToolDefinitions(
         tool({
           args,
           description: mcpTool.description ?? mcpTool.name,
-          execute: async (arguments_, context) =>
-            getOpenCodeToolResult(
+          execute: async (arguments_, context) => {
+            await context.ask({
+              permission: name,
+              patterns: ["*"],
+              always: ["*"],
+              metadata: {},
+            });
+            return getOpenCodeToolResult(
               name,
               await coordinator.execute(
                 mcpTool.name,
                 arguments_ as Record<string, unknown>,
                 context,
               ),
-            ),
+            );
+          },
         }),
       ];
     }),

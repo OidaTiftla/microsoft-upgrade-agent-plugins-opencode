@@ -10,7 +10,7 @@ Install the npm package, then restart OpenCode so it reloads the plugin configur
 opencode plugin opencode-upgrade-agent
 ```
 
-Shared prerequisites are the .NET SDK 10 or later (`dnx`), Node.js, npm, and npx. The plugin sets `APPMOD_DISABLE_TELEMETRY=true` and `APPMOD_DISABLE_MCP_APPS=true` for the Core MCP process and its spawned extenders. These settings are opt-outs; they are not independent network-level telemetry verification.
+Shared prerequisites are the .NET SDK 10 or later (`dnx`), Node.js, and npx. The plugin sets `APPMOD_DISABLE_TELEMETRY=true` and `APPMOD_DISABLE_MCP_APPS=true` for the Core MCP process and its spawned extenders. These settings are opt-outs; they are not independent network-level telemetry verification.
 
 ## Platform support
 

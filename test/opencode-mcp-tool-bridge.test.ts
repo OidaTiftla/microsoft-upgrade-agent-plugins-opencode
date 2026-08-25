@@ -141,6 +141,57 @@ test("createOpenCodeMcpToolDefinitions_TopLevelArguments_Expect_RequiredAndOptio
   ]);
 });
 
+test("createOpenCodeMcpToolDefinitions_ToolPermission_Expect_AsksBeforeDispatch", async (t) => {
+  for (const [policy, ask] of [
+    ["allow", async () => undefined],
+    ["ask", async () => undefined],
+    ["deny", async () => Promise.reject(new Error("Denied"))],
+  ] as const) {
+    await t.test(policy, async () => {
+      // Arrange
+      const calls: unknown[] = [];
+      const permissions: unknown[] = [];
+      const definitions = createOpenCodeMcpToolDefinitions(
+        "Upgrade",
+        [{ inputSchema: { type: "object" }, name: "get_state" }],
+        new CoreToolExecutionCoordinator(
+          {
+            callTool: async (...arguments_) => {
+              calls.push(arguments_);
+              return { content: [] };
+            },
+            listTools: async () => ({ tools: [] }),
+          },
+          sampling(),
+        ),
+      );
+      const toolContext = {
+        ...context("session"),
+        ask: async (input: Parameters<ToolContext["ask"]>[0]) => {
+          permissions.push(input);
+          await ask();
+        },
+      };
+
+      // Act
+      const action = definitions.Upgrade_get_state.execute({}, toolContext);
+
+      // Assert
+      if (policy === "deny") await assert.rejects(action, /Denied/);
+      else await action;
+      assert.deepEqual(permissions, [
+        {
+          always: ["*"],
+          metadata: {},
+          patterns: ["*"],
+          permission: "Upgrade_get_state",
+        },
+      ]);
+      assert.equal(calls.length, policy === "deny" ? 0 : 1);
+    });
+  }
+});
+
 test("waitForStableMcpTools_QuietPeriod_Expect_UsesNotificationsAndPolling", async () => {
   // Arrange
   let now = 0;

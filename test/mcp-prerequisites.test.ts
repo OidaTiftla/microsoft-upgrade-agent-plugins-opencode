@@ -11,7 +11,6 @@ const executableNames: readonly McpPrerequisite[] = [
   "dnx",
   "dotnet",
   "node",
-  "npm",
   "npx",
 ];
 

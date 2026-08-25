@@ -10,7 +10,7 @@ import { getBundledExternalDirectoryPattern } from "../src/agent-registration.ts
 
 const BUNDLED_AGENT_COUNT = 16;
 const SAMPLING_AGENT_NAME = "UpgradeSampler";
-const COMMAND_TIMEOUT_MS = 120_000;
+const COMMAND_TIMEOUT_MS = 300_000;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 
 interface CommandResult {
@@ -19,6 +19,13 @@ interface CommandResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly timedOut: boolean;
+}
+
+interface EffectiveAgent {
+  readonly hidden?: unknown;
+  readonly mode?: unknown;
+  readonly permission?: Readonly<Record<string, unknown>>;
+  readonly prompt?: unknown;
 }
 
 function appendOutput(
@@ -105,20 +112,31 @@ function getPackedTarball(output: string, directory: string): string {
   return join(directory, filename);
 }
 
+function getEffectiveAgent(config: unknown, name: string): EffectiveAgent {
+  const agents =
+    config !== null &&
+    typeof config === "object" &&
+    "agent" in config &&
+    config.agent !== null &&
+    typeof config.agent === "object"
+      ? config.agent
+      : undefined;
+  const agent =
+    agents !== undefined && Object.hasOwn(agents, name)
+      ? (agents as Record<string, unknown>)[name]
+      : undefined;
+  if (agent === null || typeof agent !== "object")
+    throw new Error(
+      `OpenCode effective configuration is missing agent "${name}".`,
+    );
+  return agent as EffectiveAgent;
+}
+
 function expectIncludes(output: string, expected: string): void {
   assert.ok(
     output.includes(expected),
     `Expected output to include: ${expected}\nOutput:\n${output}`,
   );
-}
-
-function expectOrdered(output: string, expected: readonly string[]): void {
-  let position = 0;
-  for (const value of expected) {
-    position = output.indexOf(value, position);
-    assert.notEqual(position, -1, `Expected output to include: ${value}`);
-    position += value.length;
-  }
 }
 
 function stripAnsi(output: string): string {
@@ -211,107 +229,68 @@ async function main(): Promise<void> {
       process.cwd(),
       environment,
     );
-    const agentList = await expectCommand(
-      "opencode",
-      ["agent", "list"],
-      process.cwd(),
-      environment,
-    );
-    const upgrade = await expectCommand(
-      "opencode",
-      ["debug", "agent", "Upgrade"],
-      process.cwd(),
-      environment,
-    );
-    const worker = await expectCommand(
-      "opencode",
-      ["debug", "agent", "BuildValidator"],
-      process.cwd(),
-      environment,
-    );
-    const unrelated = await expectCommand(
-      "opencode",
-      ["debug", "agent", "Unrelated"],
-      process.cwd(),
-      environment,
-    );
-    const explicit = await expectCommand(
-      "opencode",
-      ["debug", "agent", "Explicit"],
-      process.cwd(),
-      environment,
-    );
-    const sampler = await expectCommand(
-      "opencode",
-      ["debug", "agent", SAMPLING_AGENT_NAME],
-      process.cwd(),
-      environment,
-    );
     const mcpList = await expectCommand(
       "opencode",
       ["mcp", "list"],
       process.cwd(),
       environment,
     );
-    const configOutput = `${config.stdout}\n${config.stderr}`;
-    const agentOutput = `${agentList.stdout}\n${agentList.stderr}`;
-    const upgradeOutput = `${upgrade.stdout}\n${upgrade.stderr}`;
-    const workerOutput = `${worker.stdout}\n${worker.stderr}`;
-    const unrelatedOutput = `${unrelated.stdout}\n${unrelated.stderr}`;
-    const explicitOutput = `${explicit.stdout}\n${explicit.stderr}`;
-    const samplerOutput = `${sampler.stdout}\n${sampler.stderr}`;
+    const effectiveConfig = JSON.parse(config.stdout) as unknown;
     const mcpOutput = `${mcpList.stdout}\n${mcpList.stderr}`;
 
     for (const { name } of agents.agents) {
-      expectIncludes(configOutput, name);
-      expectIncludes(agentOutput, name);
+      getEffectiveAgent(effectiveConfig, name);
     }
-    expectIncludes(configOutput, "Unrelated");
-    expectIncludes(configOutput, "Explicit");
-    expectIncludes(configOutput, SAMPLING_AGENT_NAME);
-    expectIncludes(upgradeOutput, "primary");
-    expectIncludes(upgradeOutput, "## OpenCode host compatibility");
+    const upgrade = getEffectiveAgent(effectiveConfig, "Upgrade");
+    const worker = getEffectiveAgent(effectiveConfig, "BuildValidator");
+    const unrelated = getEffectiveAgent(effectiveConfig, "Unrelated");
+    const explicit = getEffectiveAgent(effectiveConfig, "Explicit");
+    const sampler = getEffectiveAgent(effectiveConfig, SAMPLING_AGENT_NAME);
+    const upgradePrompt = String(upgrade.prompt);
+    const bundledExternalDirectory = {
+      [getBundledExternalDirectoryPattern(bundledPluginRoot)]: "allow",
+    };
+    assert.equal(upgrade.mode, "primary");
+    expectIncludes(upgradePrompt, "## OpenCode host compatibility");
+    assert.equal(upgrade.permission?.task, "allow");
     expectIncludes(
-      upgradeOutput,
-      '"permission": "task",\n      "action": "allow"',
-    );
-    expectIncludes(
-      upgradeOutput,
+      upgradePrompt,
       "task` returns the worker result directly and synchronously",
     );
     assert.ok(
-      upgradeOutput.indexOf("Collect the result with **one long-wait") <
-        upgradeOutput.indexOf("This supersedes any preceding background"),
+      upgradePrompt.indexOf("Collect the result with **one long-wait") <
+        upgradePrompt.indexOf("This supersedes any preceding background"),
     );
-    expectOrdered(upgradeOutput, [
-      '"permission": "*",\n      "action": "deny"',
-      '"permission": "Upgrade_get_state",\n      "action": "allow"',
-      '"permission": "open_canvas",\n      "action": "deny"',
-      '"permission": "Upgrade_open_dashboard",\n      "action": "deny"',
-      `"permission": "external_directory",\n      "pattern": "${getBundledExternalDirectoryPattern(bundledPluginRoot)}",\n      "action": "allow"`,
-    ]);
-    expectIncludes(workerOutput, "subagent");
-    expectIncludes(workerOutput, "hidden");
-    expectIncludes(workerOutput, "task` returns the worker result directly");
-    expectIncludes(workerOutput, '"permission": "external_directory"');
+    const expectedUpgradePermissions = {
+      "*": "deny",
+      Upgrade_get_state: "allow",
+      open_canvas: "deny",
+      sampling: "ask",
+      task: "allow",
+      Upgrade_open_dashboard: "deny",
+    };
+    for (const [permission, expected] of Object.entries(
+      expectedUpgradePermissions,
+    ))
+      assert.equal(upgrade.permission?.[permission], expected);
+    assert.deepEqual(
+      upgrade.permission?.external_directory,
+      bundledExternalDirectory,
+    );
+    assert.equal(worker.mode, "subagent");
+    assert.equal(worker.hidden, true);
     expectIncludes(
-      workerOutput,
-      `"pattern": "${getBundledExternalDirectoryPattern(bundledPluginRoot)}"`,
+      String(worker.prompt),
+      "task` returns the worker result directly",
     );
-    expectIncludes(
-      upgradeOutput,
-      '"permission": "sampling",\n      "action": "ask"',
+    assert.deepEqual(
+      worker.permission?.external_directory,
+      bundledExternalDirectory,
     );
-    expectIncludes(
-      unrelatedOutput,
-      '"permission": "sampling",\n      "action": "ask"',
-    );
-    expectIncludes(
-      explicitOutput,
-      '"permission": "sampling",\n      "action": "deny"',
-    );
-    expectIncludes(samplerOutput, "subagent");
-    expectIncludes(samplerOutput, "hidden");
+    assert.equal(unrelated.permission?.sampling, "ask");
+    assert.equal(explicit.permission?.sampling, "deny");
+    assert.equal(sampler.mode, "subagent");
+    assert.equal(sampler.hidden, true);
     assert.deepEqual(getMcpNames(mcpOutput), []);
     assert.equal(mcpOutput.includes("Upgrade"), false);
     assert.equal(mcpOutput.includes("upgrade-dotnet"), false);

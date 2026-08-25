@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 
-export type McpPrerequisite = "dnx" | "dotnet" | "node" | "npm" | "npx";
+export type McpPrerequisite = "dnx" | "dotnet" | "node" | "npx";
 
 export interface PrerequisiteCommandResult {
   readonly succeeded: boolean;
@@ -47,11 +47,6 @@ const prerequisiteDefinitions: readonly PrerequisiteDefinition[] = [
     prerequisite: "node",
     remediation:
       "Install Node.js, including node, and ensure it is available on PATH.",
-  },
-  {
-    prerequisite: "npm",
-    remediation:
-      "Install Node.js, including npm, and ensure it is available on PATH.",
   },
   {
     prerequisite: "npx",
