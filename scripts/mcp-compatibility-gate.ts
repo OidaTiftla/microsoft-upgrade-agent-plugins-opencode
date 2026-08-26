@@ -255,45 +255,43 @@ async function runCompatibilityGate(): Promise<void> {
       hostDir,
       pluginRoot,
     });
-    const [dotnet, typescript] = await Promise.all([
-      runBridgeFixture({
-        expectedContent: "net10.0",
-        extenderArguments: (fixturePath) => ({
-          projectPath: "",
-          solutionPath: join(fixturePath, "FrameworkUpgradeFixture.sln"),
-          targetFramework: "",
-        }),
-        extenderTool: "get_dotnet_upgrade_options",
-        fixture: "dotnet-framework-upgrade",
-        instructions: [
-          { kind: "scenario", query: "dotnet-version-upgrade" },
-          { kind: "skill", query: "migrating-csharp-nullable-references" },
-        ],
-        resources: [
-          "extenders/upgrade-dotnet/upgrade/skills/lazy/common/migrating-csharp-nullable-references/scripts/Get-NullableReadiness.ps1",
-        ],
-        scenario: "dotnet-version-upgrade",
+    const dotnet = await runBridgeFixture({
+      expectedContent: "net10.0",
+      extenderArguments: (fixturePath) => ({
+        projectPath: "",
+        solutionPath: join(fixturePath, "FrameworkUpgradeFixture.sln"),
+        targetFramework: "",
       }),
-      runBridgeFixture({
-        artifactPath: ".tsupgrader/PROGRESS.md",
-        expectedContent: "typeScriptMigrationNeeded",
-        extenderArguments: (fixturePath) => ({
-          requestedPackages: ["typescript"],
-          rootDirectory: fixturePath,
-          skill: "typescript-compiler-upgrade",
-        }),
-        extenderTool: "typescript_scan_dependencies",
-        fixture: "typescript-compiler-upgrade",
-        instructions: [
-          { kind: "skill", query: "typescript-compiler-upgrade" },
-          { kind: "skill", query: "typescript-dependencies-upgrade" },
-        ],
-        resources: [
-          "extenders/upgrade-typescript/upgrade/skills/typescript-compiler-upgrade/compiler-upgrade.md",
-          "extenders/upgrade-typescript/upgrade/skills/typescript-dependencies-upgrade/upgrade-packages.md",
-        ],
+      extenderTool: "get_dotnet_upgrade_options",
+      fixture: "dotnet-framework-upgrade",
+      instructions: [
+        { kind: "scenario", query: "dotnet-version-upgrade" },
+        { kind: "skill", query: "migrating-csharp-nullable-references" },
+      ],
+      resources: [
+        "extenders/upgrade-dotnet/upgrade/skills/lazy/common/migrating-csharp-nullable-references/scripts/Get-NullableReadiness.ps1",
+      ],
+      scenario: "dotnet-version-upgrade",
+    });
+    const typescript = await runBridgeFixture({
+      artifactPath: ".tsupgrader/PROGRESS.md",
+      expectedContent: "typeScriptMigrationNeeded",
+      extenderArguments: (fixturePath) => ({
+        requestedPackages: ["typescript"],
+        rootDirectory: fixturePath,
+        skill: "typescript-compiler-upgrade",
       }),
-    ]);
+      extenderTool: "typescript_scan_dependencies",
+      fixture: "typescript-compiler-upgrade",
+      instructions: [
+        { kind: "skill", query: "typescript-compiler-upgrade" },
+        { kind: "skill", query: "typescript-dependencies-upgrade" },
+      ],
+      resources: [
+        "extenders/upgrade-typescript/upgrade/skills/typescript-compiler-upgrade/compiler-upgrade.md",
+        "extenders/upgrade-typescript/upgrade/skills/typescript-dependencies-upgrade/upgrade-packages.md",
+      ],
+    });
     const diagnostics = {
       coreInstances: 2,
       hostExtendersPath: files.hostExtendersPath,
