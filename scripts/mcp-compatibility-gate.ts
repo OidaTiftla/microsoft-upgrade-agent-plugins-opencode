@@ -47,7 +47,7 @@ async function withFixture<T>(
   action: (path: string) => Promise<T>,
 ): Promise<T> {
   const temporaryRoot = await mkdtemp(
-    join(tmpdir(), "opencode-upgrade-agent-"),
+    join(tmpdir(), "opencode-microsoft-upgrade-agent-"),
   );
   const fixturePath = join(temporaryRoot, name);
   await cp(join(workspaceRoot, "test", "fixtures", name), fixturePath, {
@@ -243,7 +243,9 @@ async function runCompatibilityGate(): Promise<void> {
     );
   }
 
-  const hostDir = await mkdtemp(join(tmpdir(), "opencode-upgrade-host-"));
+  const hostDir = await mkdtemp(
+    join(tmpdir(), "opencode-microsoft-upgrade-host-"),
+  );
   try {
     const manifest = await loadMcpVersionManifest(
       new URL("../src/mcp-versions.json", import.meta.url),

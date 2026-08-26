@@ -1,12 +1,12 @@
-# OpenCode Upgrade Agent Plugin
+# OpenCode Microsoft Upgrade Agent Plugin
 
 ## Rationale
 
-Make the existing Upgrade Agent available as the npm package `opencode-upgrade-agent` without reimplementing Microsoft’s upgrade workflows. Keep the existing agents, skills, and extender manifests as upstream-compatible source assets, and add a thin OpenCode runtime adapter around them to minimize future merge conflicts.
+Make the existing Upgrade Agent available as the npm package `opencode-microsoft-upgrade-agent` without reimplementing Microsoft’s upgrade workflows. Keep the existing agents, skills, and extender manifests as upstream-compatible source assets, and add a thin OpenCode runtime adapter around them to minimize future merge conflicts.
 
 ## Acceptance criteria (AC)
 
-- [x] `opencode-upgrade-agent` can be installed as an OpenCode plugin on Linux, macOS, and Windows, with installation, restart, prerequisites, and usage documented.
+- [x] `opencode-microsoft-upgrade-agent` can be installed as an OpenCode plugin on Linux, macOS, and Windows, with installation, restart, prerequisites, and usage documented.
 - [x] Before MCP startup, the plugin reports actionable diagnostics for missing `dnx`, .NET SDK 10+, Node.js, or `npx` prerequisites instead of surfacing an opaque MCP connection failure.
 - [x] The plugin registers all bundled agents (16 at baseline) at runtime with the correct primary/subagent visibility, mapped permissions, and user-selected OpenCode model defaults.
 - [x] A shared compatibility instruction maps Copilot behavior to OpenCode: `execute` to `bash`, `search` to `glob`/`grep`, `web` to `webfetch`, `ask_user` to `question`, `agent`/`read_agent` to `task`, MCP tool names to their OpenCode IDs, and Canvas behavior to textual status and artifact paths.

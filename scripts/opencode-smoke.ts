@@ -149,7 +149,9 @@ function getMcpNames(output: string): string[] {
 }
 
 async function main(): Promise<void> {
-  const home = await mkdtemp(join(tmpdir(), "opencode-upgrade-smoke-"));
+  const home = await mkdtemp(
+    join(tmpdir(), "opencode-microsoft-upgrade-smoke-"),
+  );
   try {
     const pack = await expectCommand(
       "npm",
@@ -173,7 +175,11 @@ async function main(): Promise<void> {
       process.cwd(),
       process.env,
     );
-    const pluginRoot = join(home, "node_modules", "opencode-upgrade-agent");
+    const pluginRoot = join(
+      home,
+      "node_modules",
+      "opencode-microsoft-upgrade-agent",
+    );
     const bundledPluginRoot = join(pluginRoot, "plugins", "upgrade-agent");
     const pluginEntry = join(pluginRoot, "src", "index.ts");
     await access(pluginEntry);

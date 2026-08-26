@@ -1,13 +1,13 @@
-# OpenCode Upgrade Agent
+# OpenCode Microsoft Upgrade Agent
 
-`opencode-upgrade-agent` brings Microsoft Upgrade Agent workflows to OpenCode. It supports .NET and TypeScript/JavaScript upgrades through the Core `Upgrade` MCP and bundled extenders.
+`opencode-microsoft-upgrade-agent` brings Microsoft Upgrade Agent workflows to OpenCode. It supports .NET and TypeScript/JavaScript upgrades through the Core `Upgrade` MCP and bundled extenders.
 
 ## Install and restart OpenCode
 
 Install the npm package, then restart OpenCode so it reloads the plugin configuration.
 
 ```bash
-opencode plugin opencode-upgrade-agent
+opencode plugin opencode-microsoft-upgrade-agent
 ```
 
 Shared prerequisites are the .NET SDK 10 or later (`dnx`), Node.js, and npx. The plugin sets `APPMOD_DISABLE_TELEMETRY=true` and `APPMOD_DISABLE_MCP_APPS=true` for the Core MCP process and its spawned extenders. These settings are opt-outs; they are not independent network-level telemetry verification.
@@ -30,7 +30,7 @@ Configure the plugin as a tuple when changing sampling behavior:
 
 ```json
 {
-  "plugin": [["opencode-upgrade-agent", { "sampling": "ask" }]]
+  "plugin": [["opencode-microsoft-upgrade-agent", { "sampling": "ask" }]]
 }
 ```
 

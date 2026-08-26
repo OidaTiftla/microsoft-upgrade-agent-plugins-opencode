@@ -1,5 +1,5 @@
 {
-  "name": "opencode-upgrade-agent",
+  "name": "opencode-microsoft-upgrade-agent",
   "version": "1.1.441",
   "description": "OpenCode adapter for the Microsoft Upgrade Agent workflows.",
   "type": "module",

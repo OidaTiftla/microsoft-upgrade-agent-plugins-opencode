@@ -82,7 +82,9 @@ export function createSamplingHandler(
 export async function createPrivateCoreMcpClient(
   options: PrivateCoreMcpClientOptions,
 ): Promise<PrivateCoreMcpClient> {
-  const hostDir = await mkdtemp(join(tmpdir(), "opencode-upgrade-host-"));
+  const hostDir = await mkdtemp(
+    join(tmpdir(), "opencode-microsoft-upgrade-host-"),
+  );
   let client: Client | undefined;
   const toolListListeners = new Set<() => void>();
   try {
@@ -93,7 +95,10 @@ export async function createPrivateCoreMcpClient(
       pluginRoot: options.pluginRoot,
     });
     const connectedClient = new Client(
-      { name: "opencode-upgrade-agent-private-core", version: "0.0.0" },
+      {
+        name: "opencode-microsoft-upgrade-agent-private-core",
+        version: "0.0.0",
+      },
       {
         capabilities: { sampling: {} },
         listChanged: {

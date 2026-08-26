@@ -216,7 +216,7 @@ async function main(): Promise<void> {
     throw new Error(
       "On Windows, set OPENCODE_AUTH_CONTENT; secure auth-file copying is unavailable.",
     );
-  const root = await mkdtemp(join(tmpdir(), "opencode-upgrade-e2e-"));
+  const root = await mkdtemp(join(tmpdir(), "opencode-microsoft-upgrade-e2e-"));
   const fixture = join(root, "dotnet-framework-upgrade");
   const home = join(root, "opencode");
   const workflow = join(
