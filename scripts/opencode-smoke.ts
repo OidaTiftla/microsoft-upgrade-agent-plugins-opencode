@@ -10,6 +10,7 @@ import { getBundledExternalDirectoryPattern } from "../src/agent-registration.ts
 
 const SAMPLING_AGENT_NAME = "UpgradeSampler";
 const COMMAND_TIMEOUT_MS = 300_000;
+const TERMINATION_GRACE_MS = 5_000;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 
 interface CommandResult {
@@ -58,18 +59,34 @@ async function runCommand(
   environment: NodeJS.ProcessEnv,
 ): Promise<CommandResult> {
   const displayCommand = `${command} ${args.join(" ")}`;
+  const executable = process.platform === "win32" ? `${command}.cmd` : command;
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawn(executable, args, {
       cwd: directory,
+      detached: process.platform !== "win32",
       env: environment,
+      shell: process.platform === "win32",
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let settled = false;
+    let force: ReturnType<typeof setTimeout> | undefined;
+    const finish = (exitCode: number | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      clearTimeout(force);
+      resolve({ command: displayCommand, exitCode, stdout, stderr, timedOut });
+    };
     const timeout = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
+      terminate(child, "SIGTERM");
+      force = setTimeout(() => {
+        terminate(child, "SIGKILL");
+        finish(null);
+      }, TERMINATION_GRACE_MS);
     }, COMMAND_TIMEOUT_MS);
 
     child.stdout.on("data", (chunk: Buffer) => {
@@ -79,13 +96,13 @@ async function runCommand(
       stderr = appendOutput(stderr, chunk, "stderr");
     });
     child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timeout);
+      clearTimeout(force);
       reject(error);
     });
-    child.on("close", (exitCode) => {
-      clearTimeout(timeout);
-      resolve({ command: displayCommand, exitCode, stdout, stderr, timedOut });
-    });
+    child.on("close", finish);
   });
 }
 
@@ -136,6 +153,32 @@ function expectIncludes(output: string, expected: string): void {
     output.includes(expected),
     `Expected output to include: ${expected}\nOutput:\n${output}`,
   );
+}
+
+function terminate(
+  child: ReturnType<typeof spawn>,
+  signal: NodeJS.Signals,
+): void {
+  if (child.pid === undefined) return;
+  try {
+    if (process.platform !== "win32")
+      return void process.kill(-child.pid, signal);
+  } catch {
+    // Fall through to the portable child-process fallback.
+  }
+  if (process.platform === "win32" && signal === "SIGTERM") {
+    const taskkill = spawn(
+      "taskkill",
+      ["/PID", String(child.pid), "/T", "/F"],
+      {
+        stdio: "ignore",
+      },
+    );
+    taskkill.on("error", () => child.kill(signal));
+    taskkill.unref();
+    return;
+  }
+  child.kill(signal);
 }
 
 function stripAnsi(output: string): string {
