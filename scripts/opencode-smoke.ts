@@ -72,13 +72,17 @@ async function runCommand(
   environment: NodeJS.ProcessEnv,
 ): Promise<CommandResult> {
   const displayCommand = `${command} ${args.join(" ")}`;
-  const executable = process.platform === "win32" ? `${command}.cmd` : command;
+  const windows = process.platform === "win32";
+  const executable = windows ? `${command}.cmd` : command;
+  const spawnCommand = windows
+    ? (process.env.ComSpec ?? "cmd.exe")
+    : executable;
+  const spawnArgs = windows ? ["/d", "/s", "/c", executable, ...args] : args;
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {
+    const child = spawn(spawnCommand, spawnArgs, {
       cwd: directory,
-      detached: process.platform !== "win32",
+      detached: !windows,
       env: environment,
-      shell: process.platform === "win32",
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
