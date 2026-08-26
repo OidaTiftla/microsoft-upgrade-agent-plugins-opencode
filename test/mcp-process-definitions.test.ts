@@ -72,6 +72,8 @@ test("createCoreMcpProcessDefinition_HostDiscovery_Expect_ConfiguredCore", () =>
       APPMOD_CALLER_TYPE: "copilot-cli",
       APPMOD_DISABLE_MCP_APPS: "true",
       APPMOD_DISABLE_TELEMETRY: "true",
+      DOTNET_CLI_TELEMETRY_OPTOUT: "true",
+      DOTNET_NOLOGO: "true",
       APPMOD_HOST_DIR: "/host",
       MODERNIZE_ORCHESTRATOR_PLUGIN_ROOT: "/plugin",
     },

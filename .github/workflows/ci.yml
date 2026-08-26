@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
 
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_NOLOGO: "true"
+
 jobs:
   validate:
     name: Validate (ubuntu-latest)
