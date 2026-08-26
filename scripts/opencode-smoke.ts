@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 
 import { convertBundledAgents } from "../src/agent-converter.ts";
-import { getBundledExternalDirectoryPattern } from "../src/agent-registration.ts";
 
 const SAMPLING_AGENT_NAME = "UpgradeSampler";
 const COMMAND_TIMEOUT_MS = 300_000;
@@ -26,6 +25,20 @@ interface EffectiveAgent {
   readonly mode?: unknown;
   readonly permission?: Readonly<Record<string, unknown>>;
   readonly prompt?: unknown;
+}
+
+function assertBundledExternalDirectory(agent: EffectiveAgent): void {
+  const entries = Object.entries(agent.permission?.external_directory ?? {});
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0][1], "allow");
+  assert.ok(
+    entries[0][0]
+      .replaceAll("\\", "/")
+      .toLowerCase()
+      .endsWith(
+        "/node_modules/opencode-microsoft-upgrade-agent/plugins/upgrade-agent/**",
+      ),
+  );
 }
 
 function appendOutput(
@@ -295,9 +308,6 @@ async function main(): Promise<void> {
     const explicit = getEffectiveAgent(effectiveConfig, "Explicit");
     const sampler = getEffectiveAgent(effectiveConfig, SAMPLING_AGENT_NAME);
     const upgradePrompt = String(upgrade.prompt);
-    const bundledExternalDirectory = {
-      [getBundledExternalDirectoryPattern(bundledPluginRoot)]: "allow",
-    };
     assert.equal(upgrade.mode, "primary");
     expectIncludes(upgradePrompt, "## OpenCode host compatibility");
     assert.equal(upgrade.permission?.task, "allow");
@@ -321,20 +331,14 @@ async function main(): Promise<void> {
       expectedUpgradePermissions,
     ))
       assert.equal(upgrade.permission?.[permission], expected);
-    assert.deepEqual(
-      upgrade.permission?.external_directory,
-      bundledExternalDirectory,
-    );
+    assertBundledExternalDirectory(upgrade);
     assert.equal(worker.mode, "subagent");
     assert.equal(worker.hidden, true);
     expectIncludes(
       String(worker.prompt),
       "task` returns the worker result directly",
     );
-    assert.deepEqual(
-      worker.permission?.external_directory,
-      bundledExternalDirectory,
-    );
+    assertBundledExternalDirectory(worker);
     assert.equal(unrelated.permission?.sampling, "ask");
     assert.equal(explicit.permission?.sampling, "deny");
     assert.equal(sampler.mode, "subagent");
