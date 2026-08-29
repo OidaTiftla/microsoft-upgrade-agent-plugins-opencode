@@ -1,0 +1,32 @@
+name: Auto-merge Dependabot Updates
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  MERGE_METHOD: rebase # Options: merge, rebase
+
+jobs:
+  auto-merge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          case "$MERGE_METHOD" in
+            merge|rebase) ;;
+            *)
+              echo "MERGE_METHOD must be merge or rebase" >&2
+              exit 1
+              ;;
+          esac
+          gh pr merge --auto "--${MERGE_METHOD}" "$PR_URL"
