@@ -31,80 +31,6 @@ export interface HostDiscoveryFiles {
 
 const DNX_TIMEOUT_MS = 300_000;
 const PINNED_VERSION = /^\d+\.\d+\.\d+$/;
-const MCP_PACKAGE_NAMES = {
-  core: "Microsoft.GitHubCopilot.Upgrade.Mcp",
-  dotnet: "Microsoft.GitHubCopilot.Upgrade.DotNet.Mcp",
-  typescript: "@microsoft/jsts-upgrade-assistant",
-} as const;
-
-function resolveManifestFile(
-  path: URL | string,
-  fileName: string,
-): URL | string {
-  return path instanceof URL ? new URL(fileName, path) : join(path, fileName);
-}
-
-function getDependencyVersion(
-  manifest: Record<string, unknown>,
-  packageName: string,
-): string {
-  const dependencies = manifest.dependencies;
-  if (dependencies === null || typeof dependencies !== "object") {
-    throw new Error("MCP npm manifest requires dependencies.");
-  }
-  const version = (dependencies as Record<string, unknown>)[packageName];
-  if (typeof version !== "string" || !PINNED_VERSION.test(version)) {
-    throw new Error(
-      `MCP npm manifest requires ${packageName} to have an explicit version.`,
-    );
-  }
-  return version;
-}
-
-function getNugetVersions(project: string): Map<string, string> {
-  const versions = new Map<string, string>();
-  const packageReferencePattern =
-    /<PackageReference\s+Include="([^"]+)"\s+Version="([^"]+)"\s*\/>/g;
-  for (const match of project.matchAll(packageReferencePattern)) {
-    versions.set(match[1], match[2]);
-  }
-  return versions;
-}
-
-function getNugetVersion(
-  versions: ReadonlyMap<string, string>,
-  packageName: string,
-): string {
-  const version = versions.get(packageName);
-  if (version === undefined || !PINNED_VERSION.test(version)) {
-    throw new Error(
-      `MCP NuGet manifest requires ${packageName} to have an explicit version.`,
-    );
-  }
-  return version;
-}
-
-function createMcpVersionManifest(
-  npmManifest: Record<string, unknown>,
-  nugetProject: string,
-): McpVersionManifest {
-  const nugetVersions = getNugetVersions(nugetProject);
-  return parseMcpVersionManifest({
-    core: {
-      package: MCP_PACKAGE_NAMES.core,
-      version: getNugetVersion(nugetVersions, MCP_PACKAGE_NAMES.core),
-    },
-    dotnet: {
-      package: MCP_PACKAGE_NAMES.dotnet,
-      version: getNugetVersion(nugetVersions, MCP_PACKAGE_NAMES.dotnet),
-    },
-    typescript: {
-      package: MCP_PACKAGE_NAMES.typescript,
-      version: getDependencyVersion(npmManifest, MCP_PACKAGE_NAMES.typescript),
-    },
-  });
-}
-
 function getVersionPin(
   manifest: Record<string, unknown>,
   name: string,
@@ -155,7 +81,7 @@ function getExtenderPackage(
   );
   if (matches.length === 0)
     throw new Error(
-      `Extender ${id} has an unpinned MCP package argument. Add an explicit pin to the MCP dependency manifests.`,
+      `Extender ${id} has an unpinned MCP package argument. Add an explicit pin to src/mcp-versions.json.`,
     );
   if (matches.length !== 1)
     throw new Error(`Extender ${id} must reference exactly one MCP package.`);
@@ -218,11 +144,7 @@ export function parseMcpVersionManifest(manifest: unknown): McpVersionManifest {
 export async function loadMcpVersionManifest(
   path: URL | string,
 ): Promise<McpVersionManifest> {
-  const [npmManifest, nugetProject] = await Promise.all([
-    readFile(resolveManifestFile(path, "package.json"), "utf8"),
-    readFile(resolveManifestFile(path, "McpVersions.csproj"), "utf8"),
-  ]);
-  return createMcpVersionManifest(JSON.parse(npmManifest), nugetProject);
+  return parseMcpVersionManifest(JSON.parse(await readFile(path, "utf8")));
 }
 
 export function createCoreMcpProcessDefinition(

@@ -126,7 +126,7 @@ async function runBridgeFixture(input: {
       sampling: async () => {
         throw new Error("Compatibility gate must not request sampling.");
       },
-      versionManifestPath: new URL("../src/mcp-versions/", import.meta.url),
+      versionManifestPath: new URL("../src/mcp-versions.json", import.meta.url),
     });
     let notifications = 0;
     const unsubscribe = core.subscribeToToolListChanges(() => {
@@ -248,7 +248,7 @@ async function runCompatibilityGate(): Promise<void> {
   );
   try {
     const manifest = await loadMcpVersionManifest(
-      new URL("../src/mcp-versions/", import.meta.url),
+      new URL("../src/mcp-versions.json", import.meta.url),
     );
     const files = await writeHostDiscoveryFiles(hostDir, pluginRoot, manifest);
     const definition = createCoreMcpProcessDefinition(manifest, {
