@@ -1,6 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
+  "enabledManagers": ["npm", "github-actions", "devcontainer", "custom.regex"],
+  "schedule": ["before 5am on Monday"],
   "customManagers": [
     {
       "customType": "regex",
@@ -22,6 +24,13 @@
     }
   ],
   "packageRules": [
+    {
+      "matchManagers": ["npm", "github-actions", "devcontainer"],
+      "automerge": true,
+      "platformAutomerge": true,
+      "automergeStrategy": "rebase",
+      "ignoreTests": false
+    },
     {
       "description": "Keep tested Upgrade MCP package pins compatible.",
       "matchManagers": ["custom.regex"],
