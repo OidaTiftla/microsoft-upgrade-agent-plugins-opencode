@@ -3,6 +3,8 @@ name: Auto-merge Dependabot Updates
 on:
   pull_request_target:
     types: [opened, reopened, synchronize]
+    paths-ignore:
+      - "src/mcp-versions/**"
 
 permissions:
   contents: write

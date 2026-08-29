@@ -245,7 +245,7 @@ async function main(): Promise<void> {
       sampling: async () => {
         throw new Error("E2E setup unexpectedly requested sampling.");
       },
-      versionManifestPath: new URL("../src/mcp-versions.json", import.meta.url),
+      versionManifestPath: new URL("../src/mcp-versions/", import.meta.url),
     });
     try {
       await core.callTool("get_state", { path: fixture });

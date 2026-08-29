@@ -1,0 +1,7 @@
+{
+  "name": "opencode-microsoft-upgrade-agent-mcp-versions",
+  "private": true,
+  "dependencies": {
+    "@microsoft/jsts-upgrade-assistant": "0.1.6"
+  }
+}

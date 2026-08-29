@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
   createCoreMcpProcessDefinition,
+  loadMcpVersionManifest,
   parseMcpVersionManifest,
   writeHostDiscoveryFiles,
 } from "../src/mcp-process-definitions.ts";
@@ -47,6 +48,40 @@ test("parseMcpVersionManifest_MissingVersion_Expect_ThrowsException", () => {
 
   // Assert
   assert.throws(action, /dotnet.version must be an explicit version/);
+});
+
+test("loadMcpVersionManifest_DependencyManifests_Expect_ParsedPins", async () => {
+  // Arrange
+  const root = await mkdtemp(join(tmpdir(), "mcp-version-manifests-"));
+  try {
+    await writeFile(
+      join(root, "package.json"),
+      JSON.stringify({
+        name: "mcp-versions",
+        dependencies: {
+          "@microsoft/jsts-upgrade-assistant": "0.1.6",
+        },
+      }),
+    );
+    await writeFile(
+      join(root, "McpVersions.csproj"),
+      `<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.GitHubCopilot.Upgrade.Mcp" Version="1.1.441" />
+    <PackageReference Include="Microsoft.GitHubCopilot.Upgrade.DotNet.Mcp" Version="1.1.441" />
+  </ItemGroup>
+</Project>
+`,
+    );
+
+    // Act
+    const manifest = await loadMcpVersionManifest(root);
+
+    // Assert
+    assert.deepEqual(manifest, versionManifest);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("createCoreMcpProcessDefinition_HostDiscovery_Expect_ConfiguredCore", () => {
