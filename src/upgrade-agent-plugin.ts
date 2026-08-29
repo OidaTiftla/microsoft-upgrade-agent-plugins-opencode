@@ -91,7 +91,7 @@ function createDefaultPrivateClient(
     pluginRoot: BUNDLED_PLUGIN_ROOT,
     sampling,
     signal,
-    versionManifestPath: new URL("./mcp-versions/", import.meta.url),
+    versionManifestPath: new URL("./mcp-versions.json", import.meta.url),
   });
 }
 

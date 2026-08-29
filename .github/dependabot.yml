@@ -25,17 +25,3 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "chore: :package: "
-
-  - package-ecosystem: "npm"
-    directory: "/src/mcp-versions"
-    schedule:
-      interval: "weekly"
-    commit-message:
-      prefix: "chore: :package: "
-
-  - package-ecosystem: "nuget"
-    directory: "/src/mcp-versions"
-    schedule:
-      interval: "weekly"
-    commit-message:
-      prefix: "chore: :package: "
