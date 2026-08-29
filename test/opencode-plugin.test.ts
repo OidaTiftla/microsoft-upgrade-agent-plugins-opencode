@@ -86,7 +86,7 @@ function dependencies(input: {
   };
 }
 
-test("packageEntry_Exports_Expect_DefaultPluginOnly", async () => {
+test("packageEntry_ExportsServerEntrypoint_Expect_DefaultPluginOnly", async () => {
   // Arrange
   const packageJson = JSON.parse(
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -96,7 +96,7 @@ test("packageEntry_Exports_Expect_DefaultPluginOnly", async () => {
   const exports = Object.keys(packageEntry);
 
   // Assert
-  assert.equal(packageJson.exports, "./src/index.ts");
+  assert.equal(packageJson.exports["./server"], "./src/index.ts");
   assert.deepEqual(exports, ["default"]);
   assert.equal(typeof packageEntry.default, "function");
 });
