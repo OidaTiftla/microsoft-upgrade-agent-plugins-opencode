@@ -1,6 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": [
+    "github>OidaTiftla/renovate-config"
+  ],
   "enabledManagers": ["npm", "github-actions", "devcontainer", "custom.regex"],
   "schedule": ["before 5am on Monday"],
   "customManagers": [
