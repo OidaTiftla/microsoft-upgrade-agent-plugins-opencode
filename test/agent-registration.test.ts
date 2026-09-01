@@ -94,6 +94,23 @@ test("registerConvertedAgents_BundledAgents_Expect_PreservedOpenCodeConfiguratio
   assert.equal(config.agent?.TaskExecutor?.model, undefined);
 });
 
+test("convertBundledAgents_CompatibilityContext_Expect_NativeWorkerContinuationGuidance", async () => {
+  // Arrange
+  const converted = await convertBundledAgents(agentDirectory);
+  const agents = new Map(converted.agents.map((agent) => [agent.name, agent]));
+
+  // Act
+  const upgrade = agents.get("Upgrade");
+
+  // Assert
+  assert.equal(upgrade?.permission.question, "allow");
+  assert.match(
+    upgrade?.system ?? "",
+    /supplied labels and descriptions as its options/,
+  );
+  assert.match(upgrade?.system ?? "", /same `task_id`/);
+});
+
 test("registerConvertedAgents_ConflictingNames_Expect_ThrowsException", async () => {
   // Arrange
   const converted = await convertBundledAgents(agentDirectory);
