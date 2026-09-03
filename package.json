@@ -27,7 +27,8 @@
     "test:integration": "node scripts/mcp-compatibility-gate.ts",
     "test:opencode": "node scripts/opencode-smoke.ts",
     "test:package": "node scripts/package-validation.ts",
-    "test:sampling-e2e": "node scripts/sampling-e2e.ts"
+    "test:sampling-e2e": "node scripts/sampling-e2e.ts",
+    "poc:dynamic-mcp": "node scripts/dynamic-mcp-poc.ts"
   },
   "dependencies": {
     "@opencode-ai/plugin": "1.18.27",
