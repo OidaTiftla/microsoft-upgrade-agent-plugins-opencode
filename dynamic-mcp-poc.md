@@ -1,5 +1,25 @@
 ## Dynamic-MCP proof of concept
 
+### Context-correlation spike (phase 1)
+
+- isolated fixture only; does not modify or migrate `Upgrade`
+- `test/fixtures/dynamic-mcp/invocation-context-plugin.ts`
+  - enables a dynamically registered local stdio proxy MCP
+  - starts a token-authenticated `127.0.0.1` IPC listener only while enabled
+  - registers `{ sessionID, callID, tool }` in `tool.execute.before` and releases it in `tool.execute.after`
+- `invocation-context-proxy_get_invocation_context`
+  - returns the active invocation context through the authenticated local IPC channel
+  - one proxy invocation at a time; unmatched or concurrent calls fail clearly
+- **Not Core sampling yet**
+  - no Core MCP changes, sampling requests, or Upgrade migration
+
+#### Manual verification
+
+1. Load `test/fixtures/dynamic-mcp/invocation-context-plugin.ts` as a local OpenCode plugin.
+2. Invoke `enable_invocation_context_proxy`.
+3. Invoke `invocation-context-proxy_get_invocation_context` in the same chat.
+4. Verify JSON containing the current `sessionID`, `callID`, and qualified `tool`; then invoke `disable_invocation_context_proxy`.
+
 - **Do not build on the static-contract work**
   - isolated experimental plugin
   - no checked-in tool cache
