@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -8,6 +8,17 @@ import {
   getRuntimeAssetPaths,
   validatePackageInventory,
 } from "../scripts/package-inventory.ts";
+
+test("packageMetadata_RuntimeNodeVersion_Expect_NativeTypeScriptSupport", async () => {
+  // Arrange
+  const packagePath = new URL("../package.json", import.meta.url);
+
+  // Act
+  const packageJson = JSON.parse(await readFile(packagePath, "utf8"));
+
+  // Assert
+  assert.equal(packageJson.engines.node, ">=22.18.0");
+});
 
 test("getRuntimeAssetPaths_RuntimeSources_Expect_AllRequiredAssets", async () => {
   // Arrange

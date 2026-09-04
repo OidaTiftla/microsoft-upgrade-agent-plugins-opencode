@@ -66,8 +66,12 @@ test("registerConvertedAgents_BundledAgents_Expect_PreservedOpenCodeConfiguratio
     config.agent?.Upgrade?.permission ?? {},
   );
   assert.equal(upgradePermissions[0], "*");
-  assert.deepEqual(upgradePermissions.slice(-2), [
+  assert.deepEqual(upgradePermissions.slice(-6), [
     "Upgrade_open_dashboard",
+    "enable_upgrade_mcp",
+    "disable_upgrade_mcp",
+    "get_upgrade_mcp_status",
+    "list_upgrade_mcp_tools",
     "external_directory",
   ]);
   assert.deepEqual(
@@ -89,6 +93,18 @@ test("registerConvertedAgents_BundledAgents_Expect_PreservedOpenCodeConfiguratio
       ?.task,
     "allow",
   );
+  for (const tool of [
+    "enable_upgrade_mcp",
+    "disable_upgrade_mcp",
+    "get_upgrade_mcp_status",
+    "list_upgrade_mcp_tools",
+  ])
+    assert.equal(
+      (
+        config.agent?.Upgrade?.permission as Record<string, string> | undefined
+      )?.[tool],
+      "allow",
+    );
   assert.equal(config.agent?.Upgrade?.prompt?.endsWith(compatibility), true);
   assert.equal(config.agent?.Upgrade?.model, undefined);
   assert.equal(config.agent?.TaskExecutor?.model, undefined);
@@ -220,6 +236,10 @@ test("registerConvertedAgents_FilesystemPermissions_Expect_ScopedExternalDirecto
   assert.deepEqual(config.agent?.McpOnly?.permission, {
     "*": "deny",
     Upgrade_get_state: "allow",
+    enable_upgrade_mcp: "allow",
+    disable_upgrade_mcp: "allow",
+    get_upgrade_mcp_status: "allow",
+    list_upgrade_mcp_tools: "allow",
   });
   assert.deepEqual(config.agent?.BreakGlass?.permission, { "*": "allow" });
 });

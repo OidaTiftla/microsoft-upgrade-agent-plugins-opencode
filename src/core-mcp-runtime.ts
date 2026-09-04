@@ -1,9 +1,4 @@
-import {
-  tool,
-  type Hooks,
-  type ToolContext,
-  type ToolDefinition,
-} from "@opencode-ai/plugin";
+import type { ToolContext } from "@opencode-ai/plugin";
 import type {
   CreateMessageRequest,
   CreateMessageResult,
@@ -43,53 +38,6 @@ export interface SamplingAdapter {
   ): Promise<CreateMessageResult>;
 }
 
-export interface McpToolBridge {
-  readonly coordinator: CoreToolExecutionCoordinator;
-  readonly toolDefinition: NonNullable<Hooks["tool.definition"]>;
-  readonly tools: Record<string, ToolDefinition>;
-}
-
-function getContentText(content: unknown): string {
-  if (
-    content !== null &&
-    typeof content === "object" &&
-    "type" in content &&
-    content.type === "text" &&
-    "text" in content &&
-    typeof content.text === "string"
-  )
-    return content.text;
-  return JSON.stringify(content) ?? String(content);
-}
-
-function getResultContent(result: Record<string, unknown>): string {
-  const content = result.content;
-  if (Array.isArray(content) && content.length > 0)
-    return content.map(getContentText).join("\n");
-  if (content !== undefined && !Array.isArray(content))
-    return getContentText(content);
-  if (result.structuredContent !== undefined)
-    return JSON.stringify(result.structuredContent);
-  return JSON.stringify(result);
-}
-
-export function getOpenCodeToolResult(
-  toolName: string,
-  value: unknown,
-): { output: string; title: string } {
-  const result =
-    value !== null && typeof value === "object"
-      ? (value as Record<string, unknown>)
-      : { content: value };
-  const isError = result.isError === true;
-  const output = getResultContent(result);
-  if (isError) throw new Error(`${toolName} failed: ${output}`);
-  return {
-    output,
-    title: toolName,
-  };
-}
-
 export class CoreToolExecutionCoordinator {
   readonly #client: CoreMcpToolClient;
   readonly #sampling: SamplingAdapter;
@@ -107,7 +55,7 @@ export class CoreToolExecutionCoordinator {
     arguments_: Record<string, unknown>,
     context: ToolContext,
   ): Promise<unknown> {
-    if (this.#disposed) throw new Error("Upgrade MCP bridge is disposed.");
+    if (this.#disposed) throw new Error("Upgrade MCP runtime is disposed.");
     let release: (() => void) | undefined;
     const previous = this.#tail;
     this.#tail = new Promise((resolve) => {
@@ -121,7 +69,7 @@ export class CoreToolExecutionCoordinator {
     }
     if (this.#disposed) {
       release!();
-      throw new Error("Upgrade MCP bridge is disposed.");
+      throw new Error("Upgrade MCP runtime is disposed.");
     }
     this.#activeContext = context;
     try {
@@ -147,7 +95,7 @@ export class CoreToolExecutionCoordinator {
     request: CreateMessageRequest,
     signal: AbortSignal,
   ): Promise<CreateMessageResult> {
-    if (this.#disposed) throw new Error("Upgrade MCP bridge is disposed.");
+    if (this.#disposed) throw new Error("Upgrade MCP runtime is disposed.");
     const context = this.#activeContext;
     if (context === undefined)
       throw new Error(
@@ -177,124 +125,12 @@ function waitForQueue(
   });
 }
 
-function getOpenCodeToolName(mcpName: string, toolName: string): string {
-  return `${mcpName}_${toolName}`;
-}
-
-function getJsonObject(value: unknown, path: string): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value))
-    throw new Error(`${path} must be a JSON object.`);
-  return value as Record<string, unknown>;
-}
-
-function getTopLevelToolArguments(
-  inputSchema: unknown,
-): NonNullable<Parameters<typeof tool.schema.object>[0]> {
-  const schema = getJsonObject(inputSchema, "MCP tool inputSchema");
-  if (schema.type !== "object")
-    throw new Error("MCP tool inputSchema.type must be object.");
-  const properties =
-    schema.properties === undefined
-      ? {}
-      : getJsonObject(schema.properties, "MCP tool inputSchema.properties");
-  const required = schema.required === undefined ? [] : schema.required;
-  if (
-    !Array.isArray(required) ||
-    required.some((name) => typeof name !== "string")
-  )
-    throw new Error(
-      "MCP tool inputSchema.required must be an array of strings.",
-    );
-  const requiredNames = new Set(required as string[]);
-  return Object.fromEntries(
-    Object.keys(properties).map((name) => [
-      name,
-      requiredNames.has(name)
-        ? tool.schema
-            .unknown()
-            .refine((value) => value !== undefined, `${name} is required.`)
-        : tool.schema.unknown().optional(),
-    ]),
-  ) as NonNullable<Parameters<typeof tool.schema.object>[0]>;
-}
-
-export function createToolDefinitionHook(
-  schemas: Readonly<Record<string, unknown>>,
-): NonNullable<Hooks["tool.definition"]> {
-  return async ({ toolID }, output) => {
-    if (Object.hasOwn(schemas, toolID))
-      (output as { jsonSchema?: unknown }).jsonSchema = schemas[toolID];
-  };
-}
-
-export function createOpenCodeMcpToolDefinitions(
-  mcpName: string,
-  mcpTools: readonly McpTool[],
-  coordinator: CoreToolExecutionCoordinator,
-): Record<string, ToolDefinition> {
-  const names = mcpTools.map(({ name }) => getOpenCodeToolName(mcpName, name));
-  if (new Set(names).size !== names.length)
-    throw new Error(`MCP tool names conflict for ${mcpName}.`);
-  const definitions = Object.fromEntries(
-    mcpTools.map((mcpTool) => {
-      const name = getOpenCodeToolName(mcpName, mcpTool.name);
-      const args = getTopLevelToolArguments(mcpTool.inputSchema);
-      return [
-        name,
-        tool({
-          args,
-          description: mcpTool.description ?? mcpTool.name,
-          execute: async (arguments_, context) => {
-            await context.ask({
-              permission: name,
-              patterns: ["*"],
-              always: ["*"],
-              metadata: {},
-            });
-            return getOpenCodeToolResult(
-              name,
-              await coordinator.execute(
-                mcpTool.name,
-                arguments_ as Record<string, unknown>,
-                context,
-              ),
-            );
-          },
-        }),
-      ];
-    }),
-  );
-  return definitions;
-}
-
 export async function primeRepositoryTraits(
   client: CoreMcpToolClient,
   path: string,
   signal?: AbortSignal,
 ): Promise<unknown> {
   return client.callTool("get_state", { path }, { signal });
-}
-
-export async function createOpenCodeMcpToolBridge(
-  client: CoreMcpToolClient,
-  mcpName: string,
-  sampling: SamplingAdapter,
-  coordinator = new CoreToolExecutionCoordinator(client, sampling),
-  signal?: AbortSignal,
-): Promise<McpToolBridge> {
-  const mcpTools = await waitForStableMcpTools(client, undefined, signal);
-  return {
-    coordinator,
-    toolDefinition: createToolDefinitionHook(
-      Object.fromEntries(
-        mcpTools.map((mcpTool) => [
-          getOpenCodeToolName(mcpName, mcpTool.name),
-          mcpTool.inputSchema,
-        ]),
-      ),
-    ),
-    tools: createOpenCodeMcpToolDefinitions(mcpName, mcpTools, coordinator),
-  };
 }
 
 export interface ToolReadinessOptions {

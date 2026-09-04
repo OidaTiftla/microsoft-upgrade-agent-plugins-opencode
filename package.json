@@ -7,6 +7,9 @@
     "url": "git+https://github.com/OidaTiftla/microsoft-upgrade-agent-plugins-opencode.git"
   },
   "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "exports": {
     "./server": "./src/index.ts"
   },
@@ -27,8 +30,7 @@
     "test:integration": "node scripts/mcp-compatibility-gate.ts",
     "test:opencode": "node scripts/opencode-smoke.ts",
     "test:package": "node scripts/package-validation.ts",
-    "test:sampling-e2e": "node scripts/sampling-e2e.ts",
-    "poc:dynamic-mcp": "node scripts/dynamic-mcp-poc.ts"
+    "test:sampling-e2e": "node scripts/sampling-e2e.ts"
   },
   "dependencies": {
     "@opencode-ai/plugin": "1.18.27",

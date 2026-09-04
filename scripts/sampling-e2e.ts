@@ -195,8 +195,11 @@ function assertSampledTaskStart(output: string): void {
     .split("\n")
     .filter((line) => line.trim() !== "")
     .map((line) => JSON.parse(line) as unknown);
+  const enable = getCompletedToolUse(events, "enable_upgrade_mcp");
   const resume = getCompletedToolUse(events, "Upgrade_resume_scenario");
   const start = getCompletedToolUse(events, "Upgrade_start_task");
+  assert.ok(enable < resume, "enable must complete before resume.");
+  assert.ok(enable < start, "enable must complete before start.");
   assert.ok(resume < start, "resume must complete before start.");
   const event = events[start] as ToolUseEvent;
   if (typeof event.part.state.output !== "string")
@@ -273,11 +276,12 @@ async function main(): Promise<void> {
             mode: "primary",
             permission: {
               "*": "deny",
+              enable_upgrade_mcp: "allow",
               Upgrade_resume_scenario: "allow",
               Upgrade_start_task: "allow",
             },
             prompt:
-              "Resume the scenario once, then start the task once. Return the raw start result.",
+              "Call enable_upgrade_mcp exactly once and wait for success before calling Upgrade_resume_scenario once and Upgrade_start_task once. Return the raw start result.",
           },
         },
         model,
@@ -302,7 +306,7 @@ async function main(): Promise<void> {
         "UpgradeE2E",
         "--model",
         model,
-        `Call Upgrade_resume_scenario exactly once with scenarioId ${SCENARIO_ID}. Only after it succeeds, call Upgrade_start_task exactly once for ${TASK_ID}. Return only the raw start result.`,
+        `Call enable_upgrade_mcp exactly once. Only after it succeeds, call Upgrade_resume_scenario exactly once with scenarioId ${SCENARIO_ID}, then call Upgrade_start_task exactly once for ${TASK_ID}. Return only the raw start result.`,
       ],
       fixture,
       environment,

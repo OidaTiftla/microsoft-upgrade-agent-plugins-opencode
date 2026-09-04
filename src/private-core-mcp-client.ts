@@ -15,7 +15,7 @@ import {
   loadMcpVersionManifest,
   writeHostDiscoveryFiles,
 } from "./mcp-process-definitions.ts";
-import type { CoreMcpToolRequestOptions } from "./opencode-mcp-tool-bridge.ts";
+import type { CoreMcpToolRequestOptions } from "./core-mcp-runtime.ts";
 
 export interface PrivateCoreMcpClientOptions {
   readonly pluginRoot: string;
