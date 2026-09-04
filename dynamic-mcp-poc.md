@@ -13,10 +13,26 @@
 - **Not Core sampling yet**
   - no Core MCP changes, sampling requests, or Upgrade migration
 
+### Sampling-authorization spike (phase 2)
+
+- isolated fixture only; does not modify or migrate `src/upgrade-agent-plugin.ts`
+- shared sampling-authorization abstraction models two strategies
+  - current `SessionScopedSamplingAuthorizer`
+    - native `enable_invocation_context_proxy` calls `ToolContext.ask` before IPC startup or MCP registration/connection
+    - records approved session IDs for a future IPC sampling request to check
+  - future `PerSamplingAuthorizer`
+    - exposes `enforce` for a future IPC sampling data plane to call
+    - calls `ToolContext.ask` for every sampling request with a request-specific permission pattern
+    - remains unused by current dynamic proxy hooks
+- no child-session sampling, Core client, or IPC sampling request exists in this phase
+- per-sampling content preview is the intended future approval behavior
+  - current dynamic proxy hooks do not provide a `ToolContext` for an incoming proxy sampling request
+  - therefore this phase can only request session-scoped approval at enable time; content preview is unavailable
+
 #### Manual verification
 
 1. Load `test/fixtures/dynamic-mcp/invocation-context-plugin.ts` as a local OpenCode plugin.
-2. Invoke `enable_invocation_context_proxy`.
+2. Invoke `enable_invocation_context_proxy` and approve its session-scoped sampling authorization prompt.
 3. Invoke `invocation-context-proxy_get_invocation_context` in the same chat.
 4. Verify JSON containing the current `sessionID`, `callID`, and qualified `tool`; then invoke `disable_invocation_context_proxy`.
 

@@ -1,7 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-import { tool, type Hooks, type PluginInput } from "@opencode-ai/plugin";
+import {
+  tool,
+  type Hooks,
+  type PluginInput,
+  type ToolContext,
+} from "@opencode-ai/plugin";
 import type { McpLocalConfig, McpStatus } from "@opencode-ai/sdk";
 
 import {
@@ -10,12 +15,21 @@ import {
   type InvocationContextEndpoint,
 } from "./invocation-context.ts";
 import { INVOCATION_CONTEXT_PROXY_TOOL } from "./invocation-context-proxy-tool.ts";
+import { SessionScopedSamplingAuthorizer } from "./sampling-authorization.ts";
 
 export const INVOCATION_CONTEXT_PROXY_NAME = "invocation-context-proxy";
 export const INVOCATION_CONTEXT_PROXY_QUALIFIED_TOOL = `${INVOCATION_CONTEXT_PROXY_NAME}_${INVOCATION_CONTEXT_PROXY_TOOL}`;
 export const INVOCATION_CONTEXT_PROXY_SERVER_PATH = fileURLToPath(
   new URL("./invocation-context-proxy-mcp.ts", import.meta.url),
 );
+
+const ENABLE_SAMPLING_AUTHORIZATION = {
+  metadata: {
+    purpose:
+      "Allow future sampling requests from the invocation-context proxy in this session.",
+    scope: "session",
+  },
+};
 
 interface InvocationContextIpc {
   start(): Promise<InvocationContextEndpoint>;
@@ -67,6 +81,7 @@ export function createInvocationContextPlugin(
   const registry = new InvocationContextRegistry();
   const token = randomBytes(32).toString("hex");
   const ipc = createIpc(registry, token);
+  const samplingAuthorizer = new SessionScopedSamplingAuthorizer();
   let connected = false;
   let registered = false;
   let transition = Promise.resolve();
@@ -78,8 +93,9 @@ export function createInvocationContextPlugin(
     );
     return next;
   };
-  const enable = (): Promise<void> =>
+  const enable = (context: ToolContext): Promise<void> =>
     enqueue(async () => {
+      await samplingAuthorizer.enforce(context, ENABLE_SAMPLING_AUTHORIZATION);
       if (connected) return;
       const endpoint = await ipc.start();
       try {
@@ -143,8 +159,8 @@ export function createInvocationContextPlugin(
       enable_invocation_context_proxy: tool({
         args: {},
         description: "Enable the local invocation-context proxy MCP server.",
-        execute: async () => {
-          await enable();
+        execute: async (_, context) => {
+          await enable(context);
           return "Invocation-context proxy enabled.";
         },
       }),

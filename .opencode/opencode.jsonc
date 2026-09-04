@@ -4,5 +4,8 @@
     // "opencode-microsoft-upgrade-agent",
     // "../test/fixtures/dynamic-mcp/lazy-mcp-plugin.ts",
     "../test/fixtures/dynamic-mcp/invocation-context-plugin.ts"
-  ]
+  ],
+  "permission": {
+    "sampling": "ask"
+  }
 }

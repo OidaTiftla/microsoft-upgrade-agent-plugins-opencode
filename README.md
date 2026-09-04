@@ -50,6 +50,20 @@ Set `sampling` in the plugin tuple shown above:
 - `allow` — runs MCP sampling without approval
 - `deny` — rejects MCP sampling
 
+To require OpenCode to prompt before sampling, set the project-level permission in `.opencode/opencode.jsonc`:
+
+```jsonc
+{
+  "permission": {
+    "sampling": "ask",
+  },
+}
+```
+
+Restart OpenCode after changing this setting. The plugin's `sampling` option controls the Core MCP policy; the OpenCode permission controls whether OpenCode asks for authorization.
+
+Approval is limited to the current chat session. OpenCode 1.18.23's terminal prompt currently renders this request generically as `Call tool sampling`; it does not display plugin-provided sampling metadata or patterns. See the [OpenCode permission renderer](https://github.com/anomalyco/opencode/blob/v1.18.23/packages/tui/src/routes/session/permission.tsx).
+
 Sampling prefers `small_model`, then the parent-session model. Exact MCP hints select a candidate only when it matches one of those configured models; model preferences with higher intelligence priority favor the main model. The Core MCP runs privately inside the plugin; it is not registered in `config.mcp`. Scenario and task skills remain MCP-provided paths, not native global OpenCode skills.
 
 OpenAI backends that reject `max_output_tokens` use the sampling instruction and post-response OpenCode token accounting validation instead of a provider-side cap.

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { PluginInput } from "@opencode-ai/plugin";
+import type { PluginInput, ToolContext } from "@opencode-ai/plugin";
 
 import {
   InvocationContextIpcServer,
@@ -14,6 +14,10 @@ import {
   INVOCATION_CONTEXT_PROXY_NAME,
   INVOCATION_CONTEXT_PROXY_QUALIFIED_TOOL,
 } from "./fixtures/dynamic-mcp/invocation-context-plugin-core.ts";
+import {
+  PerSamplingAuthorizer,
+  SessionScopedSamplingAuthorizer,
+} from "./fixtures/dynamic-mcp/sampling-authorization.ts";
 
 interface McpCalls {
   add: unknown[];
@@ -24,6 +28,7 @@ interface McpCalls {
 
 function createClient(
   input: {
+    readonly add?: (request: unknown) => Promise<unknown>;
     readonly disconnect?: (request: unknown) => Promise<void>;
   } = {},
 ): {
@@ -37,9 +42,13 @@ function createClient(
       mcp: {
         add: async (request: unknown) => {
           calls.add.push(request);
-          return {
-            data: { [INVOCATION_CONTEXT_PROXY_NAME]: { status: "connected" } },
-          };
+          return (
+            (await input.add?.(request)) ?? {
+              data: {
+                [INVOCATION_CONTEXT_PROXY_NAME]: { status: "connected" },
+              },
+            }
+          );
         },
         connect: async (request: unknown) => {
           calls.connect.push(request);
@@ -56,6 +65,25 @@ function createClient(
         },
       },
     } as unknown as PluginInput["client"],
+  };
+}
+
+function createToolContext(
+  input: {
+    readonly ask?: (input: Parameters<ToolContext["ask"]>[0]) => Promise<void>;
+    readonly sessionID?: string;
+  } = {},
+): { readonly asks: unknown[]; readonly context: ToolContext } {
+  const asks: unknown[] = [];
+  return {
+    asks,
+    context: {
+      ask: async (request) => {
+        asks.push(request);
+        await input.ask?.(request);
+      },
+      sessionID: input.sessionID ?? "session-1",
+    } as ToolContext,
   };
 }
 
@@ -171,13 +199,24 @@ test("createInvocationContextPlugin_ConcurrentProxyTools_Expect_SingleFlightAndR
   await reused;
 });
 
-test("createInvocationContextPlugin_Controls_Expect_IpcAndMcpLifecycleCalls", async () => {
+test("createInvocationContextPlugin_ApprovedSession_Expect_AuthorizationBeforeLifecycle", async () => {
   // Arrange
-  const { calls, client } = createClient();
+  const events: string[] = [];
+  const { calls, client } = createClient({
+    add: async () => {
+      events.push("add");
+    },
+  });
+  const input = createToolContext({
+    ask: async () => {
+      events.push("ask");
+    },
+  });
   const ipcCalls = { start: 0, stop: 0 };
   const plugin = createInvocationContextPlugin(client, () => ({
     start: async () => {
       ipcCalls.start += 1;
+      events.push("start");
       return { host: "127.0.0.1", port: 3210 };
     },
     stop: async () => {
@@ -189,11 +228,11 @@ test("createInvocationContextPlugin_Controls_Expect_IpcAndMcpLifecycleCalls", as
   // Act
   const status = await tools.get_invocation_context_proxy_status.execute(
     {},
-    {} as never,
+    input.context,
   );
-  await tools.enable_invocation_context_proxy.execute({}, {} as never);
-  await tools.disable_invocation_context_proxy.execute({}, {} as never);
-  await tools.enable_invocation_context_proxy.execute({}, {} as never);
+  await tools.enable_invocation_context_proxy.execute({}, input.context);
+  await tools.disable_invocation_context_proxy.execute({}, input.context);
+  await tools.enable_invocation_context_proxy.execute({}, input.context);
 
   // Assert
   assert.equal(status, "Invocation-context proxy status=not registered.");
@@ -206,13 +245,27 @@ test("createInvocationContextPlugin_Controls_Expect_IpcAndMcpLifecycleCalls", as
     { path: { name: INVOCATION_CONTEXT_PROXY_NAME }, throwOnError: true },
   ]);
   assert.deepEqual(ipcCalls, { start: 2, stop: 1 });
+  assert.deepEqual(events.slice(0, 3), ["ask", "start", "add"]);
+  assert.deepEqual(input.asks, [
+    {
+      permission: "sampling",
+      patterns: ["invocation-context-proxy:session-1"],
+      always: ["invocation-context-proxy:session-1"],
+      metadata: {
+        purpose:
+          "Allow future sampling requests from the invocation-context proxy in this session.",
+        scope: "session",
+      },
+    },
+  ]);
 });
 
-test("disableInvocationContextProxy_DisconnectFails_Expect_IpcStopped", async () => {
+test("enableInvocationContextProxy_DeniedAuthorization_Expect_NoLifecycleCalls", async () => {
   // Arrange
-  const { calls, client } = createClient({
-    disconnect: async () => {
-      throw new Error("disconnect failed");
+  const { calls, client } = createClient();
+  const input = createToolContext({
+    ask: async () => {
+      throw new Error("sampling denied");
     },
   });
   const ipcCalls = { start: 0, stop: 0 };
@@ -225,13 +278,132 @@ test("disableInvocationContextProxy_DisconnectFails_Expect_IpcStopped", async ()
       ipcCalls.stop += 1;
     },
   }));
+
+  // Act
+  const enable = plugin.tool!.enable_invocation_context_proxy.execute(
+    {},
+    input.context,
+  );
+
+  // Assert
+  await assert.rejects(enable, /sampling denied/);
+  assert.deepEqual(calls, { add: [], connect: [], disconnect: [], status: [] });
+  assert.deepEqual(ipcCalls, { start: 0, stop: 0 });
+});
+
+test("SessionScopedSamplingAuthorizer_MissingSession_Expect_NotAuthorized", () => {
+  // Arrange
+  const authorizer = new SessionScopedSamplingAuthorizer();
+
+  // Act
+  const authorized = authorizer.isAuthorized("missing-session");
+
+  // Assert
+  assert.equal(authorized, false);
+});
+
+test("SessionScopedSamplingAuthorizer_ApprovedSession_Expect_CrossSessionIsolation", async () => {
+  // Arrange
+  const approved = createToolContext();
+  const unapproved = createToolContext({ sessionID: "session-2" });
+  const authorizer = new SessionScopedSamplingAuthorizer();
+
+  // Act
+  await authorizer.enforce(approved.context, { metadata: {} });
+  const authorized = authorizer.isAuthorized(approved.context.sessionID);
+  const otherSessionAuthorized = authorizer.isAuthorized(
+    unapproved.context.sessionID,
+  );
+
+  // Assert
+  assert.equal(authorized, true);
+  assert.equal(otherSessionAuthorized, false);
+});
+
+test("SessionScopedSamplingAuthorizer_DeniedSession_Expect_NotAuthorized", async () => {
+  // Arrange
+  const input = createToolContext({
+    ask: async () => {
+      throw new Error("sampling denied");
+    },
+  });
+  const authorizer = new SessionScopedSamplingAuthorizer();
+
+  // Act
+  const enforce = authorizer.enforce(input.context, { metadata: {} });
+
+  // Assert
+  await assert.rejects(enforce, /sampling denied/);
+  assert.equal(authorizer.isAuthorized(input.context.sessionID), false);
+});
+
+test("PerSamplingAuthorizer_SamplingRequests_Expect_DistinctRequestPatterns", async () => {
+  // Arrange
+  const input = createToolContext();
+  const sessionAuthorizer = new SessionScopedSamplingAuthorizer();
+  const authorizer = new PerSamplingAuthorizer();
+  const first = {
+    metadata: { preview: "first request" },
+    requestID: "request-1",
+  };
+  const second = {
+    metadata: { preview: "second request" },
+    requestID: "request-2",
+  };
+
+  // Act
+  await sessionAuthorizer.enforce(input.context, { metadata: {} });
+  await authorizer.enforce(input.context, first);
+  await authorizer.enforce(input.context, second);
+
+  // Assert
+  assert.deepEqual(input.asks, [
+    {
+      permission: "sampling",
+      patterns: ["invocation-context-proxy:session-1"],
+      always: ["invocation-context-proxy:session-1"],
+      metadata: {},
+    },
+    {
+      permission: "sampling",
+      patterns: ["invocation-context-proxy:session-1:sampling:request-1"],
+      always: [],
+      metadata: first.metadata,
+    },
+    {
+      permission: "sampling",
+      patterns: ["invocation-context-proxy:session-1:sampling:request-2"],
+      always: [],
+      metadata: second.metadata,
+    },
+  ]);
+});
+
+test("disableInvocationContextProxy_DisconnectFails_Expect_IpcStopped", async () => {
+  // Arrange
+  const { calls, client } = createClient({
+    disconnect: async () => {
+      throw new Error("disconnect failed");
+    },
+  });
+  const input = createToolContext();
+  const ipcCalls = { start: 0, stop: 0 };
+  const plugin = createInvocationContextPlugin(client, () => ({
+    start: async () => {
+      ipcCalls.start += 1;
+      return { host: "127.0.0.1", port: 3210 };
+    },
+    stop: async () => {
+      ipcCalls.stop += 1;
+    },
+  }));
   const tools = plugin.tool!;
-  await tools.enable_invocation_context_proxy.execute({}, {} as never);
+  await tools.enable_invocation_context_proxy.execute({}, input.context);
 
   // Act
   const disable = tools.disable_invocation_context_proxy.execute(
     {},
-    {} as never,
+    input.context,
   );
 
   // Assert
@@ -243,6 +415,7 @@ test("disableInvocationContextProxy_DisconnectFails_Expect_IpcStopped", async ()
 test("createInvocationContextPlugin_DisposeEnabled_Expect_DisconnectAndStop", async () => {
   // Arrange
   const { calls, client } = createClient();
+  const input = createToolContext();
   const ipcCalls = { start: 0, stop: 0 };
   const plugin = createInvocationContextPlugin(client, () => ({
     start: async () => {
@@ -253,7 +426,7 @@ test("createInvocationContextPlugin_DisposeEnabled_Expect_DisconnectAndStop", as
       ipcCalls.stop += 1;
     },
   }));
-  await plugin.tool!.enable_invocation_context_proxy.execute({}, {} as never);
+  await plugin.tool!.enable_invocation_context_proxy.execute({}, input.context);
 
   // Act
   await plugin.dispose!();
