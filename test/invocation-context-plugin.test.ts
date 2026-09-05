@@ -1,23 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { PluginInput, ToolContext } from "@opencode-ai/plugin";
+import type { Config, PluginInput, ToolContext } from "@opencode-ai/plugin";
+import type {
+  CreateMessageRequest,
+  CreateMessageResult,
+} from "@modelcontextprotocol/sdk/types.js";
 
 import {
+  INVOCATION_CONTEXT_IPC_SAMPLING_TIMEOUT_MS,
   InvocationContextIpcServer,
   InvocationContextRegistry,
   isValidInvocationContextToken,
   requestInvocationContext,
+  type InvocationContextSamplingHandler,
 } from "./fixtures/dynamic-mcp/invocation-context.ts";
 import {
   createInvocationContextPlugin,
   INVOCATION_CONTEXT_PROXY_NAME,
+  INVOCATION_CONTEXT_PROXY_QUALIFIED_SAMPLING_TOOL,
   INVOCATION_CONTEXT_PROXY_QUALIFIED_TOOL,
 } from "./fixtures/dynamic-mcp/invocation-context-plugin-core.ts";
 import {
   PerSamplingAuthorizer,
   SessionScopedSamplingAuthorizer,
 } from "./fixtures/dynamic-mcp/sampling-authorization.ts";
+import { invokeProxySampling } from "./fixtures/dynamic-mcp/proxy-sampling.ts";
+import { SAMPLING_AGENT_NAME } from "../src/sampling-agent.ts";
 
 interface McpCalls {
   add: unknown[];
@@ -68,9 +77,70 @@ function createClient(
   };
 }
 
+function createSamplingClient(
+  input: {
+    readonly prompt?: (request: unknown) => Promise<unknown>;
+  } = {},
+): {
+  readonly calls: {
+    readonly mcp: McpCalls;
+    readonly session: Record<string, unknown[]>;
+  };
+  readonly client: PluginInput["client"];
+} {
+  const base = createClient();
+  const sessionCalls = {
+    abort: [] as unknown[],
+    create: [] as unknown[],
+    delete: [] as unknown[],
+    messages: [] as unknown[],
+    prompt: [] as unknown[],
+  };
+  const assistant = {
+    modelID: "parent-model",
+    providerID: "parent-provider",
+    tokens: { output: 1 },
+  };
+  const session = {
+    abort: async (request: unknown) => {
+      sessionCalls.abort.push(request);
+      return { data: true };
+    },
+    create: async (request: unknown) => {
+      sessionCalls.create.push(request);
+      return { data: { id: "child-session" } };
+    },
+    delete: async (request: unknown) => {
+      sessionCalls.delete.push(request);
+      return { data: true };
+    },
+    messages: async (request: unknown) => {
+      sessionCalls.messages.push(request);
+      return { data: [{ info: assistant }] };
+    },
+    prompt: async (request: unknown) => {
+      sessionCalls.prompt.push(request);
+      return (
+        (await input.prompt?.(request)) ?? {
+          data: {
+            info: assistant,
+            parts: [{ text: "sampled", type: "text" }],
+          },
+        }
+      );
+    },
+  };
+  return {
+    calls: { mcp: base.calls, session: sessionCalls },
+    client: { ...base.client, session } as PluginInput["client"],
+  };
+}
+
 function createToolContext(
   input: {
     readonly ask?: (input: Parameters<ToolContext["ask"]>[0]) => Promise<void>;
+    readonly abort?: AbortSignal;
+    readonly directory?: string;
     readonly sessionID?: string;
   } = {},
 ): { readonly asks: unknown[]; readonly context: ToolContext } {
@@ -82,10 +152,150 @@ function createToolContext(
         asks.push(request);
         await input.ask?.(request);
       },
+      abort: input.abort ?? new AbortController().signal,
+      directory: input.directory ?? "/native-workspace",
       sessionID: input.sessionID ?? "session-1",
     } as ToolContext,
   };
 }
+
+function samplingRequest(text = "sample this"): CreateMessageRequest {
+  return {
+    method: "sampling/createMessage",
+    params: {
+      maxTokens: 10,
+      messages: [{ content: { text, type: "text" }, role: "user" }],
+    },
+  };
+}
+
+test("invokeProxySampling_InvalidMcpSignals_Expect_FreshActiveSignal", async () => {
+  // Arrange
+  const nativeContext = createToolContext().context;
+  const invalidSignals = [
+    undefined,
+    false,
+    {},
+    { aborted: "false" },
+    Object.create(AbortSignal.prototype),
+  ];
+  const receivedSignals: AbortSignal[] = [];
+
+  // Act
+  await Promise.all(
+    invalidSignals.map((signal) =>
+      invokeProxySampling(
+        nativeContext,
+        samplingRequest(),
+        signal,
+        async (_, context) => {
+          receivedSignals.push(context.abort);
+        },
+      ),
+    ),
+  );
+
+  // Assert
+  assert.equal(receivedSignals.length, invalidSignals.length);
+  for (const signal of receivedSignals) {
+    assert.equal(signal.aborted, false);
+    assert.notEqual(signal, nativeContext.abort);
+    signal.addEventListener("abort", () => undefined, { once: true });
+  }
+  assert.equal(new Set(receivedSignals).size, invalidSignals.length);
+});
+
+test("invokeProxySampling_ActiveMcpSignal_Expect_Forwarded", async () => {
+  // Arrange
+  const nativeContext = createToolContext().context;
+  const controller = new AbortController();
+  let receivedSignal: AbortSignal | undefined;
+
+  // Act
+  await invokeProxySampling(
+    nativeContext,
+    samplingRequest(),
+    controller.signal,
+    async (_, context) => {
+      receivedSignal = context.abort;
+    },
+  );
+
+  // Assert
+  assert.equal(receivedSignal, controller.signal);
+  assert.equal(receivedSignal.aborted, false);
+});
+
+test("invokeProxySampling_AbortedMcpSignal_Expect_Forwarded", async () => {
+  // Arrange
+  const nativeContext = createToolContext().context;
+  const controller = new AbortController();
+  controller.abort(new Error("MCP request cancelled."));
+  let receivedSignal: AbortSignal | undefined;
+
+  // Act
+  await invokeProxySampling(
+    nativeContext,
+    samplingRequest(),
+    controller.signal,
+    async (_, context) => {
+      receivedSignal = context.abort;
+    },
+  );
+
+  // Assert
+  assert.equal(receivedSignal, controller.signal);
+  assert.equal(receivedSignal.aborted, true);
+});
+
+test("invokeProxySampling_McpCancellation_Expect_ReachesCallback", async () => {
+  // Arrange
+  const nativeContext = createToolContext().context;
+  const controller = new AbortController();
+  let notifyCancelled: (() => void) | undefined;
+  const cancelled = new Promise<void>((resolve) => {
+    notifyCancelled = resolve;
+  });
+
+  // Act
+  const sampling = invokeProxySampling(
+    nativeContext,
+    samplingRequest(),
+    controller.signal,
+    async (_, context) => {
+      context.abort.addEventListener("abort", notifyCancelled!, { once: true });
+      await cancelled;
+    },
+  );
+  controller.abort();
+  await sampling;
+
+  // Assert
+  assert.equal(controller.signal.aborted, true);
+});
+
+test("invokeProxySampling_NativeToolContext_Expect_SessionAndDirectoryPreserved", async () => {
+  // Arrange
+  const nativeContext = createToolContext({
+    directory: "/native-workspace",
+    sessionID: "native-session",
+  }).context;
+  let receivedContext: ToolContext | undefined;
+
+  // Act
+  await invokeProxySampling(
+    nativeContext,
+    samplingRequest(),
+    new AbortController().signal,
+    async (_, context) => {
+      receivedContext = context;
+    },
+  );
+
+  // Assert
+  assert.equal(receivedContext?.directory, nativeContext.directory);
+  assert.equal(receivedContext?.sessionID, nativeContext.sessionID);
+});
 
 test("isValidInvocationContextToken_EqualAndDifferent_Expect_Validated", () => {
   // Arrange
@@ -199,6 +409,23 @@ test("createInvocationContextPlugin_ConcurrentProxyTools_Expect_SingleFlightAndR
   await reused;
 });
 
+test("createInvocationContextPlugin_Config_Expect_HiddenModelOnlySamplingAgent", async () => {
+  // Arrange
+  const { client } = createClient();
+  const plugin = createInvocationContextPlugin(client);
+  const config: Config = { small_model: "provider/small" };
+
+  // Act
+  await plugin.config!(config);
+
+  // Assert
+  assert.equal(config.agent?.[SAMPLING_AGENT_NAME]?.hidden, true);
+  assert.equal(config.agent?.[SAMPLING_AGENT_NAME]?.mode, "subagent");
+  assert.deepEqual(config.agent?.[SAMPLING_AGENT_NAME]?.permission, {
+    "*": "deny",
+  });
+});
+
 test("createInvocationContextPlugin_ApprovedSession_Expect_AuthorizationBeforeLifecycle", async () => {
   // Arrange
   const events: string[] = [];
@@ -241,6 +468,14 @@ test("createInvocationContextPlugin_ApprovedSession_Expect_AuthorizationBeforeLi
   assert.deepEqual(calls.connect, [
     { path: { name: INVOCATION_CONTEXT_PROXY_NAME }, throwOnError: true },
   ]);
+  assert.equal(
+    (
+      calls.add[0] as {
+        readonly body: { readonly config: { readonly timeout: number } };
+      }
+    ).body.config.timeout,
+    INVOCATION_CONTEXT_IPC_SAMPLING_TIMEOUT_MS,
+  );
   assert.deepEqual(calls.disconnect, [
     { path: { name: INVOCATION_CONTEXT_PROXY_NAME }, throwOnError: true },
   ]);
@@ -258,6 +493,249 @@ test("createInvocationContextPlugin_ApprovedSession_Expect_AuthorizationBeforeLi
       },
     },
   ]);
+});
+
+test("createInvocationContextPlugin_SamplingHandler_Expect_OnlyApprovedSessionsForwarded", async () => {
+  // Arrange
+  const { client } = createClient();
+  const input = createToolContext();
+  const invocation = {
+    callID: "call-1",
+    sessionID: input.context.sessionID,
+    tool: INVOCATION_CONTEXT_PROXY_QUALIFIED_SAMPLING_TOOL,
+  };
+  const request: CreateMessageRequest = {
+    method: "sampling/createMessage",
+    params: {
+      maxTokens: 10,
+      messages: [
+        { content: { text: "sample this", type: "text" }, role: "user" },
+      ],
+    },
+  };
+  let ipcSamplingHandler: InvocationContextSamplingHandler | undefined;
+  const calls: Array<{
+    invocation: Parameters<InvocationContextSamplingHandler>[0];
+    request: CreateMessageRequest;
+  }> = [];
+  const plugin = createInvocationContextPlugin(
+    client,
+    (_, __, handler) => {
+      ipcSamplingHandler = handler;
+      return {
+        start: async () => ({ host: "127.0.0.1", port: 3210 }),
+        stop: async () => undefined,
+      };
+    },
+    async (matchedInvocation, matchedRequest): Promise<CreateMessageResult> => {
+      calls.push({ invocation: matchedInvocation, request: matchedRequest });
+      return {
+        content: { text: "sampled", type: "text" },
+        model: "fixture-model",
+        role: "assistant",
+      };
+    },
+  );
+  if (ipcSamplingHandler === undefined)
+    throw new Error("Expected an injected IPC sampling handler.");
+
+  // Act
+  const denied = ipcSamplingHandler(
+    invocation,
+    request,
+    new AbortController().signal,
+  );
+  await plugin.tool!.enable_invocation_context_proxy.execute({}, input.context);
+  await plugin["tool.execute.before"]!(invocation, { args: {} });
+  const result = await ipcSamplingHandler(
+    invocation,
+    request,
+    new AbortController().signal,
+  );
+  await plugin["tool.execute.after"]!(
+    { ...invocation, args: {} },
+    { metadata: {}, output: "", title: "" },
+  );
+
+  // Assert
+  await assert.rejects(denied, /Sampling request unavailable/);
+  assert.equal(input.asks.length, 1);
+  assert.deepEqual(calls, [{ invocation, request }]);
+  assert.deepEqual(result, {
+    content: { text: "sampled", type: "text" },
+    model: "fixture-model",
+    role: "assistant",
+  });
+});
+
+test("createInvocationContextPlugin_DefaultSamplingHandler_Expect_ConfiguredChildSessionSampling", async () => {
+  // Arrange
+  const sdk = createSamplingClient();
+  const input = createToolContext();
+  const directory = "/fixture-workspace";
+  const invocation = {
+    callID: "call-1",
+    sessionID: input.context.sessionID,
+    tool: INVOCATION_CONTEXT_PROXY_QUALIFIED_SAMPLING_TOOL,
+  };
+  const request: CreateMessageRequest = {
+    method: "sampling/createMessage",
+    params: {
+      maxTokens: 10,
+      messages: [
+        { content: { text: "sample this", type: "text" }, role: "user" },
+      ],
+    },
+  };
+  let ipcSamplingHandler: InvocationContextSamplingHandler | undefined;
+  const plugin = createInvocationContextPlugin(
+    sdk.client,
+    (_, __, handler) => {
+      ipcSamplingHandler = handler;
+      return {
+        start: async () => ({ host: "127.0.0.1", port: 3210 }),
+        stop: async () => undefined,
+      };
+    },
+    undefined,
+    directory,
+  );
+  if (ipcSamplingHandler === undefined)
+    throw new Error("Expected the default IPC sampling handler.");
+  await plugin.config!({
+    small_model: "small-provider/small-model",
+  } as never);
+  await plugin.tool!.enable_invocation_context_proxy.execute({}, input.context);
+
+  // Act
+  const result = await ipcSamplingHandler(
+    invocation,
+    request,
+    new AbortController().signal,
+  );
+
+  // Assert
+  assert.deepEqual(result, {
+    content: { text: "sampled", type: "text" },
+    model: "small-provider/small-model",
+    role: "assistant",
+  });
+  assert.deepEqual(sdk.calls.session.messages, [
+    { path: { id: "session-1" }, query: { directory }, throwOnError: true },
+  ]);
+  assert.deepEqual(sdk.calls.session.create, [
+    {
+      body: { parentID: "session-1", title: "Upgrade MCP sampling" },
+      query: { directory },
+      throwOnError: true,
+    },
+  ]);
+  assert.deepEqual(sdk.calls.session.prompt, [
+    {
+      body: {
+        agent: SAMPLING_AGENT_NAME,
+        model: { modelID: "small-model", providerID: "small-provider" },
+        parts: [{ text: "user:\nsample this", type: "text" }],
+        system: "Return only the requested sampling response within 10 tokens.",
+        tools: {},
+      },
+      path: { id: "child-session" },
+      query: { directory },
+      throwOnError: true,
+    },
+  ]);
+  assert.deepEqual(sdk.calls.session.delete, [
+    {
+      path: { id: "child-session" },
+      query: { directory },
+      throwOnError: true,
+    },
+  ]);
+  assert.equal(input.asks.length, 1);
+});
+
+test("createInvocationContextPlugin_DefaultSamplingHandler_AbortedIpc_Expect_ChildSessionAborted", async () => {
+  // Arrange
+  let promptStarted: (() => void) | undefined;
+  let completePrompt: (() => void) | undefined;
+  const directory = "/fixture-workspace";
+  const sdk = createSamplingClient({
+    prompt: async () => {
+      promptStarted?.();
+      await new Promise<void>((resolve) => {
+        completePrompt = resolve;
+      });
+      return {
+        data: {
+          info: {
+            modelID: "parent-model",
+            providerID: "parent-provider",
+            tokens: { output: 1 },
+          },
+          parts: [{ text: "sampled", type: "text" }],
+        },
+      };
+    },
+  });
+  const input = createToolContext();
+  const invocation = {
+    callID: "call-1",
+    sessionID: input.context.sessionID,
+    tool: INVOCATION_CONTEXT_PROXY_QUALIFIED_SAMPLING_TOOL,
+  };
+  const request: CreateMessageRequest = {
+    method: "sampling/createMessage",
+    params: {
+      maxTokens: 10,
+      messages: [
+        { content: { text: "sample this", type: "text" }, role: "user" },
+      ],
+    },
+  };
+  const promptStartedPromise = new Promise<void>((resolve) => {
+    promptStarted = resolve;
+  });
+  let ipcSamplingHandler: InvocationContextSamplingHandler | undefined;
+  const plugin = createInvocationContextPlugin(
+    sdk.client,
+    (_, __, handler) => {
+      ipcSamplingHandler = handler;
+      return {
+        start: async () => ({ host: "127.0.0.1", port: 3210 }),
+        stop: async () => undefined,
+      };
+    },
+    undefined,
+    directory,
+  );
+  if (ipcSamplingHandler === undefined)
+    throw new Error("Expected the default IPC sampling handler.");
+  await plugin.tool!.enable_invocation_context_proxy.execute({}, input.context);
+  const controller = new AbortController();
+
+  // Act
+  const sampling = ipcSamplingHandler(invocation, request, controller.signal);
+  await promptStartedPromise;
+  controller.abort(new Error("IPC sampling cancelled."));
+  completePrompt!();
+
+  // Assert
+  await assert.rejects(sampling, /IPC sampling cancelled/);
+  assert.deepEqual(sdk.calls.session.abort, [
+    {
+      path: { id: "child-session" },
+      query: { directory },
+      throwOnError: true,
+    },
+  ]);
+  assert.deepEqual(sdk.calls.session.delete, [
+    {
+      path: { id: "child-session" },
+      query: { directory },
+      throwOnError: true,
+    },
+  ]);
+  assert.equal(input.asks.length, 1);
 });
 
 test("enableInvocationContextProxy_DeniedAuthorization_Expect_NoLifecycleCalls", async () => {

@@ -1,40 +1,33 @@
 ## Dynamic-MCP proof of concept
 
-### Context-correlation spike (phase 1)
+### Context and sampling fixture
 
-- isolated fixture only; does not modify or migrate `Upgrade`
+- isolated fixture; no Core MCP changes or Upgrade migration
 - `test/fixtures/dynamic-mcp/invocation-context-plugin.ts`
-  - enables a dynamically registered local stdio proxy MCP
-  - starts a token-authenticated `127.0.0.1` IPC listener only while enabled
-  - registers `{ sessionID, callID, tool }` in `tool.execute.before` and releases it in `tool.execute.after`
+  - dynamically registers a local stdio proxy MCP while enabled
+  - starts its authenticated `127.0.0.1` IPC listener only while enabled
+  - registers `{ sessionID, callID, tool }` before proxy execution and releases it after execution
 - `invocation-context-proxy_get_invocation_context`
-  - returns the active invocation context through the authenticated local IPC channel
-  - one proxy invocation at a time; unmatched or concurrent calls fail clearly
-- **Not Core sampling yet**
-  - no Core MCP changes, sampling requests, or Upgrade migration
-
-### Sampling-authorization spike (phase 2)
-
-- isolated fixture only; does not modify or migrate `src/upgrade-agent-plugin.ts`
-- shared sampling-authorization abstraction models two strategies
-  - current `SessionScopedSamplingAuthorizer`
-    - native `enable_invocation_context_proxy` calls `ToolContext.ask` before IPC startup or MCP registration/connection
-    - records approved session IDs for a future IPC sampling request to check
-  - future `PerSamplingAuthorizer`
-    - exposes `enforce` for a future IPC sampling data plane to call
-    - calls `ToolContext.ask` for every sampling request with a request-specific permission pattern
-    - remains unused by current dynamic proxy hooks
-- no child-session sampling, Core client, or IPC sampling request exists in this phase
-- per-sampling content preview is the intended future approval behavior
-  - current dynamic proxy hooks do not provide a `ToolContext` for an incoming proxy sampling request
-  - therefore this phase can only request session-scoped approval at enable time; content preview is unavailable
+  - returns only the active exact-match invocation context
+- `invocation-context-proxy_sample_invocation_context`
+  - forwards `text` and `maxTokens` through the active exact-match context
+  - uses a live OpenCode child session through `OpenCodeSamplingAdapter`
+- enable-time session approval is the only `ToolContext.ask` policy; unapproved sessions are denied
+- IPC requires its token and exact `{ sessionID, callID, tool }` match; context, release, and sampling failures are sanitized
+- invalid proxy signals are replaced with an active `AbortSignal`; valid signals preserve cancellation
+- control messages time out after 1 second; sampling IPC and the local MCP request timeout are both 60 minutes
+- valid-signal cancellation, client disconnects, disable, and plugin disposal stop sampling immediately
+- prerequisites: an authenticated OpenCode provider/model; optionally set `small_model` to `providerID/modelID`
 
 #### Manual verification
 
 1. Load `test/fixtures/dynamic-mcp/invocation-context-plugin.ts` as a local OpenCode plugin.
-2. Invoke `enable_invocation_context_proxy` and approve its session-scoped sampling authorization prompt.
+2. Invoke `enable_invocation_context_proxy` and approve the session-scoped sampling authorization.
 3. Invoke `invocation-context-proxy_get_invocation_context` in the same chat.
-4. Verify JSON containing the current `sessionID`, `callID`, and qualified `tool`; then invoke `disable_invocation_context_proxy`.
+4. Invoke `invocation-context-proxy_sample_invocation_context` with text and a small `maxTokens` value.
+5. Verify the sampled response and context JSON, then invoke `disable_invocation_context_proxy`.
+
+### Static-contract work
 
 - **Do not build on the static-contract work**
   - isolated experimental plugin
