@@ -31,6 +31,11 @@ interface RunningServer {
   readonly spawnError: () => Error | undefined;
 }
 
+interface SpawnSpec {
+  readonly command: string;
+  readonly args: readonly string[];
+}
+
 interface EffectiveAgent {
   readonly hidden?: unknown;
   readonly mode?: unknown;
@@ -77,6 +82,18 @@ function commandFailure(result: CommandResult): Error {
   );
 }
 
+function getSpawnSpec(
+  command: string,
+  args: readonly string[],
+  environment: NodeJS.ProcessEnv,
+): SpawnSpec {
+  if (process.platform !== "win32") return { command, args };
+  return {
+    command: environment.ComSpec ?? "cmd.exe",
+    args: ["/d", "/s", "/c", `${command}.cmd`, ...args],
+  };
+}
+
 async function runCommand(
   command: string,
   args: readonly string[],
@@ -85,16 +102,11 @@ async function runCommand(
   maxOutputBytes = MAX_OUTPUT_BYTES,
 ): Promise<CommandResult> {
   const displayCommand = `${command} ${args.join(" ")}`;
-  const windows = process.platform === "win32";
-  const executable = windows ? `${command}.cmd` : command;
-  const spawnCommand = windows
-    ? (process.env.ComSpec ?? "cmd.exe")
-    : executable;
-  const spawnArgs = windows ? ["/d", "/s", "/c", executable, ...args] : args;
+  const spawnSpec = getSpawnSpec(command, args, environment);
   return new Promise((resolve, reject) => {
-    const child = spawn(spawnCommand, spawnArgs, {
+    const child = spawn(spawnSpec.command, spawnSpec.args, {
       cwd: directory,
-      detached: !windows,
+      detached: process.platform !== "win32",
       env: environment,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -218,9 +230,8 @@ function startServer(
   port: number,
   environment: NodeJS.ProcessEnv,
 ): RunningServer {
-  const executable = process.platform === "win32" ? "opencode.cmd" : "opencode";
-  const child = spawn(
-    executable,
+  const spawnSpec = getSpawnSpec(
+    "opencode",
     [
       "serve",
       "--hostname",
@@ -230,13 +241,14 @@ function startServer(
       "--log-level",
       "WARN",
     ],
-    {
-      cwd: process.cwd(),
-      detached: process.platform !== "win32",
-      env: environment,
-      stdio: ["ignore", "pipe", "pipe"],
-    },
+    environment,
   );
+  const child = spawn(spawnSpec.command, spawnSpec.args, {
+    cwd: process.cwd(),
+    detached: process.platform !== "win32",
+    env: environment,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   let output = "";
   let spawnError: Error | undefined;
   child.stdout?.on("data", (chunk: Buffer) => {
