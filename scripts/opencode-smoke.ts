@@ -331,7 +331,7 @@ async function getEffectiveConfig(
   const port = await getAvailablePort();
   const server = startServer(port, environment);
   try {
-    const url = `http://127.0.0.1:${port}/config?directory=${encodeURIComponent(process.cwd())}`;
+    const url = `http://127.0.0.1:${port}/config`;
     const deadline = Date.now() + SERVER_READY_TIMEOUT_MS;
     let lastError: unknown;
     while (Date.now() < deadline) {
@@ -340,6 +340,7 @@ async function getEffectiveConfig(
       let response: Response;
       try {
         response = await fetch(url, {
+          headers: { "x-opencode-directory": process.cwd() },
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
       } catch (error) {
