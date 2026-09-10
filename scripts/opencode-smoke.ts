@@ -16,6 +16,7 @@ const POLL_INTERVAL_MS = 100;
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_CONFIG_OUTPUT_BYTES = 16 * 1024 * 1024;
+const SERVER_OUTPUT_PREFIX = "opencode server: ";
 
 interface CommandResult {
   readonly command: string;
@@ -28,6 +29,8 @@ interface CommandResult {
 interface RunningServer {
   readonly child: ChildProcess;
   readonly output: () => string;
+  readonly readyAt: () => number | undefined;
+  readonly startedAt: number;
   readonly spawnError: () => Error | undefined;
 }
 
@@ -80,6 +83,21 @@ function commandFailure(result: CommandResult): Error {
       `stderr:\n${result.stderr}`,
     ].join("\n"),
   );
+}
+
+function createPrefixedOutputWriter(
+  stream: NodeJS.WriteStream,
+): (chunk: Buffer) => void {
+  let lineStart = true;
+  return (chunk) => {
+    let output = "";
+    for (const character of chunk.toString()) {
+      if (lineStart) output += SERVER_OUTPUT_PREFIX;
+      output += character;
+      lineStart = character === "\n";
+    }
+    stream.write(output);
+  };
 }
 
 function getSpawnSpec(
@@ -230,6 +248,7 @@ function startServer(
   port: number,
   environment: NodeJS.ProcessEnv,
 ): RunningServer {
+  const startedAt = Date.now();
   const spawnSpec = getSpawnSpec(
     "opencode",
     [
@@ -250,11 +269,17 @@ function startServer(
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";
+  let readyAt: number | undefined;
   let spawnError: Error | undefined;
+  const writeStdout = createPrefixedOutputWriter(process.stdout);
+  const writeStderr = createPrefixedOutputWriter(process.stderr);
   child.stdout?.on("data", (chunk: Buffer) => {
+    writeStdout(chunk);
     output = appendOutput(output, chunk, "stdout");
+    if (output.includes("opencode server listening on")) readyAt ??= Date.now();
   });
   child.stderr?.on("data", (chunk: Buffer) => {
+    writeStderr(chunk);
     output = appendOutput(output, chunk, "stderr");
   });
   child.once("error", (error) => {
@@ -263,6 +288,8 @@ function startServer(
   return {
     child,
     output: () => output,
+    readyAt: () => readyAt,
+    startedAt,
     spawnError: () => spawnError,
   };
 }
@@ -271,11 +298,45 @@ function serverHasExited(server: RunningServer): boolean {
   return server.child.exitCode !== null || server.child.signalCode !== null;
 }
 
+function getServerStatus(server: RunningServer): string {
+  const readyAt = server.readyAt();
+  const processState = serverHasExited(server)
+    ? `exited (${server.child.signalCode ?? server.child.exitCode})`
+    : "running";
+  const readiness =
+    readyAt === undefined
+      ? "not observed"
+      : `observed after ${readyAt - server.startedAt}ms`;
+  return [
+    `process ID: ${server.child.pid ?? "unavailable"}`,
+    `process state: ${processState}`,
+    `server readiness: ${readiness}`,
+    `spawn error: ${server.spawnError()?.message ?? "none"}`,
+  ].join("\n");
+}
+
 function serverFailure(server: RunningServer): Error {
   return new Error(
     [
       "OpenCode server exited before the config API became ready.",
-      `spawn error: ${server.spawnError()?.message ?? "none"}`,
+      getServerStatus(server),
+      `output:\n${server.output()}`,
+    ].join("\n"),
+  );
+}
+
+async function waitForServerReady(server: RunningServer): Promise<void> {
+  const deadline = Date.now() + SERVER_READY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (serverHasExited(server) || server.spawnError() !== undefined)
+      throw serverFailure(server);
+    if (server.readyAt() !== undefined) return;
+    await delay(POLL_INTERVAL_MS);
+  }
+  throw new Error(
+    [
+      `OpenCode server did not report readiness after ${SERVER_READY_TIMEOUT_MS}ms.`,
+      getServerStatus(server),
       `output:\n${server.output()}`,
     ].join("\n"),
   );
@@ -331,20 +392,29 @@ async function getEffectiveConfig(
   const port = await getAvailablePort();
   const server = startServer(port, environment);
   try {
+    await waitForServerReady(server);
     const url = `http://127.0.0.1:${port}/config`;
     const deadline = Date.now() + SERVER_READY_TIMEOUT_MS;
+    let attempts = 0;
     let lastError: unknown;
+    let lastRequestDurationMs = 0;
+    let requestTimeouts = 0;
     while (Date.now() < deadline) {
       if (serverHasExited(server) || server.spawnError() !== undefined)
         throw serverFailure(server);
       let response: Response;
+      const requestStartedAt = Date.now();
+      const requestTimeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+      attempts += 1;
       try {
         response = await fetch(url, {
           headers: { "x-opencode-directory": process.cwd() },
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          signal: requestTimeout,
         });
       } catch (error) {
         lastError = error;
+        lastRequestDurationMs = Date.now() - requestStartedAt;
+        if (requestTimeout.aborted) requestTimeouts += 1;
         await delay(POLL_INTERVAL_MS);
         continue;
       }
@@ -361,7 +431,9 @@ async function getEffectiveConfig(
     throw new Error(
       [
         `OpenCode config API was not ready after ${SERVER_READY_TIMEOUT_MS}ms.`,
+        `requests: ${attempts}, timed out: ${requestTimeouts}, last duration: ${lastRequestDurationMs}ms`,
         `last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+        getServerStatus(server),
         `server output:\n${server.output()}`,
       ].join("\n"),
     );
