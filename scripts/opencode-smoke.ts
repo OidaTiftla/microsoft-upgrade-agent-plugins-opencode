@@ -1,16 +1,22 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, readdir, rm } from "node:fs/promises";
+import { createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 
 import { convertBundledAgents } from "../src/agent-converter.ts";
 
 const SAMPLING_AGENT_NAME = "UpgradeSampler";
 const COMMAND_TIMEOUT_MS = 300_000;
 const TERMINATION_GRACE_MS = 5_000;
+const SERVER_READY_TIMEOUT_MS = 30_000;
+const POLL_INTERVAL_MS = 100;
+const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
+const MAX_CONFIG_OUTPUT_BYTES = 16 * 1024 * 1024;
+const SERVER_OUTPUT_PREFIX = "opencode server: ";
 
 interface CommandResult {
   readonly command: string;
@@ -18,6 +24,19 @@ interface CommandResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly timedOut: boolean;
+}
+
+interface RunningServer {
+  readonly child: ChildProcess;
+  readonly output: () => string;
+  readonly readyAt: () => number | undefined;
+  readonly startedAt: number;
+  readonly spawnError: () => Error | undefined;
+}
+
+interface SpawnSpec {
+  readonly command: string;
+  readonly args: readonly string[];
 }
 
 interface EffectiveAgent {
@@ -45,12 +64,13 @@ function appendOutput(
   current: string,
   chunk: Buffer,
   stream: "stdout" | "stderr",
+  maxOutputBytes = MAX_OUTPUT_BYTES,
 ): string {
-  if (Buffer.byteLength(current) >= MAX_OUTPUT_BYTES) return current;
+  if (Buffer.byteLength(current) >= maxOutputBytes) return current;
   const next = `${current}${chunk}`;
-  return Buffer.byteLength(next) <= MAX_OUTPUT_BYTES
+  return Buffer.byteLength(next) <= maxOutputBytes
     ? next
-    : `${next.slice(0, MAX_OUTPUT_BYTES)}\n[${stream} truncated]`;
+    : `${next.slice(0, maxOutputBytes)}\n[${stream} truncated]`;
 }
 
 function commandFailure(result: CommandResult): Error {
@@ -65,23 +85,46 @@ function commandFailure(result: CommandResult): Error {
   );
 }
 
+function createPrefixedOutputWriter(
+  stream: NodeJS.WriteStream,
+): (chunk: Buffer) => void {
+  let lineStart = true;
+  return (chunk) => {
+    let output = "";
+    for (const character of chunk.toString()) {
+      if (lineStart) output += SERVER_OUTPUT_PREFIX;
+      output += character;
+      lineStart = character === "\n";
+    }
+    stream.write(output);
+  };
+}
+
+function getSpawnSpec(
+  command: string,
+  args: readonly string[],
+  environment: NodeJS.ProcessEnv,
+): SpawnSpec {
+  if (process.platform !== "win32") return { command, args };
+  return {
+    command: environment.ComSpec ?? "cmd.exe",
+    args: ["/d", "/s", "/c", `${command}.cmd`, ...args],
+  };
+}
+
 async function runCommand(
   command: string,
   args: readonly string[],
   directory: string,
   environment: NodeJS.ProcessEnv,
+  maxOutputBytes = MAX_OUTPUT_BYTES,
 ): Promise<CommandResult> {
   const displayCommand = `${command} ${args.join(" ")}`;
-  const windows = process.platform === "win32";
-  const executable = windows ? `${command}.cmd` : command;
-  const spawnCommand = windows
-    ? (process.env.ComSpec ?? "cmd.exe")
-    : executable;
-  const spawnArgs = windows ? ["/d", "/s", "/c", executable, ...args] : args;
+  const spawnSpec = getSpawnSpec(command, args, environment);
   return new Promise((resolve, reject) => {
-    const child = spawn(spawnCommand, spawnArgs, {
+    const child = spawn(spawnSpec.command, spawnSpec.args, {
       cwd: directory,
-      detached: !windows,
+      detached: process.platform !== "win32",
       env: environment,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -107,10 +150,10 @@ async function runCommand(
     }, COMMAND_TIMEOUT_MS);
 
     child.stdout.on("data", (chunk: Buffer) => {
-      stdout = appendOutput(stdout, chunk, "stdout");
+      stdout = appendOutput(stdout, chunk, "stdout", maxOutputBytes);
     });
     child.stderr.on("data", (chunk: Buffer) => {
-      stderr = appendOutput(stderr, chunk, "stderr");
+      stderr = appendOutput(stderr, chunk, "stderr", maxOutputBytes);
     });
     child.on("error", (error) => {
       if (settled) return;
@@ -128,8 +171,15 @@ async function expectCommand(
   args: readonly string[],
   directory: string,
   environment: NodeJS.ProcessEnv,
+  maxOutputBytes = MAX_OUTPUT_BYTES,
 ): Promise<CommandResult> {
-  const result = await runCommand(command, args, directory, environment);
+  const result = await runCommand(
+    command,
+    args,
+    directory,
+    environment,
+    maxOutputBytes,
+  );
   if (result.exitCode !== 0 || result.timedOut) throw commandFailure(result);
   return result;
 }
@@ -143,6 +193,54 @@ function getPackedTarball(output: string, directory: string): string {
   if (typeof filename !== "string")
     throw new Error("npm pack did not report a package filename.");
   return join(directory, filename);
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getDirectoryEntries(directory: string): Promise<string> {
+  try {
+    const entries = await readdir(directory);
+    return entries.length === 0 ? "none" : entries.join(", ");
+  } catch {
+    return "unavailable";
+  }
+}
+
+async function getOpenCodeDependencyStatus(
+  environment: NodeJS.ProcessEnv,
+): Promise<string> {
+  const configHome = environment.XDG_CONFIG_HOME;
+  if (configHome === undefined) return "unavailable: XDG_CONFIG_HOME is unset";
+  const directories = [join(configHome, "opencode")];
+  if (environment.OPENCODE_CONFIG_DIR !== undefined)
+    directories.push(environment.OPENCODE_CONFIG_DIR);
+  const dependencyDirectories = (
+    await Promise.all(
+      directories.map(async (directory) => {
+        const nodeModules = join(directory, "node_modules");
+        const plugin = join(
+          nodeModules,
+          "@opencode-ai",
+          "plugin",
+          "package.json",
+        );
+        return `${directory}: node_modules=${await pathExists(nodeModules)}, plugin=${await pathExists(plugin)}`;
+      }),
+    )
+  ).join("\n");
+  const stateHome = environment.XDG_STATE_HOME;
+  const locks =
+    stateHome === undefined
+      ? "unavailable: XDG_STATE_HOME is unset"
+      : await getDirectoryEntries(join(stateHome, "opencode", "locks"));
+  return `${dependencyDirectories}\ninstall locks: ${locks}`;
 }
 
 function getEffectiveAgent(config: unknown, name: string): EffectiveAgent {
@@ -172,10 +270,265 @@ function expectIncludes(output: string, expected: string): void {
   );
 }
 
-function terminate(
-  child: ReturnType<typeof spawn>,
-  signal: NodeJS.Signals,
-): void {
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function getAvailablePort(): Promise<number> {
+  const server = createTcpServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  await new Promise<void>((resolve, reject) =>
+    server.close((error) => {
+      if (error === undefined) resolve();
+      else reject(error);
+    }),
+  );
+  if (address === null || typeof address === "string")
+    throw new Error("Could not reserve a local OpenCode server port.");
+  return address.port;
+}
+
+function startServer(
+  port: number,
+  environment: NodeJS.ProcessEnv,
+): RunningServer {
+  const startedAt = Date.now();
+  const spawnSpec = getSpawnSpec(
+    "opencode",
+    [
+      "serve",
+      "--hostname",
+      "127.0.0.1",
+      "--port",
+      String(port),
+      "--print-logs",
+      "--log-level",
+      "DEBUG",
+    ],
+    environment,
+  );
+  const child = spawn(spawnSpec.command, spawnSpec.args, {
+    cwd: process.cwd(),
+    detached: process.platform !== "win32",
+    env: environment,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let output = "";
+  let readyAt: number | undefined;
+  let spawnError: Error | undefined;
+  const writeStdout = createPrefixedOutputWriter(process.stdout);
+  const writeStderr = createPrefixedOutputWriter(process.stderr);
+  child.stdout?.on("data", (chunk: Buffer) => {
+    writeStdout(chunk);
+    output = appendOutput(output, chunk, "stdout");
+    if (output.includes("opencode server listening on")) readyAt ??= Date.now();
+  });
+  child.stderr?.on("data", (chunk: Buffer) => {
+    writeStderr(chunk);
+    output = appendOutput(output, chunk, "stderr");
+  });
+  child.once("error", (error) => {
+    spawnError = error;
+  });
+  return {
+    child,
+    output: () => output,
+    readyAt: () => readyAt,
+    startedAt,
+    spawnError: () => spawnError,
+  };
+}
+
+function serverHasExited(server: RunningServer): boolean {
+  return server.child.exitCode !== null || server.child.signalCode !== null;
+}
+
+function getServerStatus(server: RunningServer): string {
+  const readyAt = server.readyAt();
+  const processState = serverHasExited(server)
+    ? `exited (${server.child.signalCode ?? server.child.exitCode})`
+    : "running";
+  const readiness =
+    readyAt === undefined
+      ? "not observed"
+      : `observed after ${readyAt - server.startedAt}ms`;
+  return [
+    `process ID: ${server.child.pid ?? "unavailable"}`,
+    `process state: ${processState}`,
+    `server readiness: ${readiness}`,
+    `spawn error: ${server.spawnError()?.message ?? "none"}`,
+  ].join("\n");
+}
+
+function serverFailure(server: RunningServer): Error {
+  return new Error(
+    [
+      "OpenCode server exited before the config API became ready.",
+      getServerStatus(server),
+      `output:\n${server.output()}`,
+    ].join("\n"),
+  );
+}
+
+async function waitForServerReady(server: RunningServer): Promise<void> {
+  const deadline = Date.now() + SERVER_READY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (serverHasExited(server) || server.spawnError() !== undefined)
+      throw serverFailure(server);
+    if (server.readyAt() !== undefined) return;
+    await delay(POLL_INTERVAL_MS);
+  }
+  throw new Error(
+    [
+      `OpenCode server did not report readiness after ${SERVER_READY_TIMEOUT_MS}ms.`,
+      getServerStatus(server),
+      `output:\n${server.output()}`,
+    ].join("\n"),
+  );
+}
+
+async function probeServerHttp(
+  server: RunningServer,
+  port: number,
+): Promise<void> {
+  const requestStartedAt = Date.now();
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  let response: Response | undefined;
+  try {
+    response = await fetch(`http://127.0.0.1:${port}/doc`, {
+      signal: timeout,
+    });
+    if (!response.ok)
+      throw new Error(
+        `HTTP ${response.status} ${response.statusText} from the OpenCode documentation endpoint.`,
+      );
+    process.stdout.write(
+      `opencode smoke: HTTP probe succeeded in ${Date.now() - requestStartedAt}ms\n`,
+    );
+  } catch (error) {
+    throw new Error(
+      [
+        "OpenCode server did not respond to an HTTP probe before config loading.",
+        `request duration: ${Date.now() - requestStartedAt}ms`,
+        `request timed out: ${timeout.aborted}`,
+        `error: ${error instanceof Error ? error.message : String(error)}`,
+        getServerStatus(server),
+        `server output:\n${server.output()}`,
+      ].join("\n"),
+    );
+  } finally {
+    await response?.body?.cancel();
+  }
+}
+
+async function stopServer(server: RunningServer): Promise<void> {
+  if (serverHasExited(server)) return;
+  terminate(server.child, "SIGTERM");
+  const deadline = Date.now() + TERMINATION_GRACE_MS;
+  while (!serverHasExited(server) && Date.now() < deadline)
+    await delay(POLL_INTERVAL_MS);
+  if (serverHasExited(server)) return;
+  terminate(server.child, "SIGKILL");
+  while (
+    !serverHasExited(server) &&
+    Date.now() < deadline + TERMINATION_GRACE_MS
+  )
+    await delay(POLL_INTERVAL_MS);
+  if (!serverHasExited(server))
+    throw new Error("OpenCode server did not exit after SIGKILL.");
+}
+
+async function readBoundedResponse(response: Response): Promise<string> {
+  const contentLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > MAX_CONFIG_OUTPUT_BYTES)
+    throw new Error("OpenCode config API response exceeded the output limit.");
+  if (response.body === null) return "";
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_CONFIG_OUTPUT_BYTES) {
+        await reader.cancel();
+        throw new Error(
+          "OpenCode config API response exceeded the output limit.",
+        );
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function getEffectiveConfig(
+  environment: NodeJS.ProcessEnv,
+): Promise<unknown> {
+  const port = await getAvailablePort();
+  const server = startServer(port, environment);
+  try {
+    await waitForServerReady(server);
+    await probeServerHttp(server, port);
+    const url = `http://127.0.0.1:${port}/config`;
+    const deadline = Date.now() + SERVER_READY_TIMEOUT_MS;
+    let attempts = 0;
+    let lastError: unknown;
+    let lastRequestDurationMs = 0;
+    let requestTimeouts = 0;
+    while (Date.now() < deadline) {
+      if (serverHasExited(server) || server.spawnError() !== undefined)
+        throw serverFailure(server);
+      let response: Response;
+      const requestStartedAt = Date.now();
+      const requestTimeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+      attempts += 1;
+      try {
+        response = await fetch(url, {
+          headers: { "x-opencode-directory": process.cwd() },
+          signal: requestTimeout,
+        });
+      } catch (error) {
+        lastError = error;
+        lastRequestDurationMs = Date.now() - requestStartedAt;
+        if (requestTimeout.aborted) requestTimeouts += 1;
+        await delay(POLL_INTERVAL_MS);
+        continue;
+      }
+      if (response.ok) {
+        const body = await readBoundedResponse(response);
+        return JSON.parse(body) as unknown;
+      }
+      lastError = new Error(
+        `Config API returned HTTP ${response.status} ${response.statusText}.`,
+      );
+      await response.body?.cancel();
+      await delay(POLL_INTERVAL_MS);
+    }
+    const dependencyStatus = await getOpenCodeDependencyStatus(environment);
+    throw new Error(
+      [
+        `OpenCode config API was not ready after ${SERVER_READY_TIMEOUT_MS}ms.`,
+        `requests: ${attempts}, timed out: ${requestTimeouts}, last duration: ${lastRequestDurationMs}ms`,
+        `last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+        `dependency status:\n${dependencyStatus}`,
+        getServerStatus(server),
+        `server output:\n${server.output()}`,
+      ].join("\n"),
+    );
+  } finally {
+    await stopServer(server);
+  }
+}
+
+function terminate(child: ChildProcess, signal: NodeJS.Signals): void {
   if (child.pid === undefined) return;
   try {
     if (process.platform !== "win32")
@@ -253,7 +606,6 @@ async function main(): Promise<void> {
     const environment = {
       ...process.env,
       OPENCODE_TEST_HOME: home,
-      OPENCODE_CONFIG_DIR: join(home, "config"),
       XDG_CONFIG_HOME: join(home, "xdg-config"),
       XDG_DATA_HOME: join(home, "xdg-data"),
       XDG_STATE_HOME: join(home, "xdg-state"),
@@ -287,20 +639,16 @@ async function main(): Promise<void> {
       OPENCODE_DISABLE_AUTOCOMPACT: "1",
       OPENCODE_DISABLE_MODELS_FETCH: "1",
       OPENCODE_AUTH_CONTENT: "{}",
+      OPENCODE_UPGRADE_AGENT_DIAGNOSTICS: "1",
+      NPM_CONFIG_AUDIT: "false",
     };
-    const config = await expectCommand(
-      "opencode",
-      ["debug", "config"],
-      process.cwd(),
-      environment,
-    );
+    const effectiveConfig = await getEffectiveConfig(environment);
     const mcpList = await expectCommand(
       "opencode",
       ["mcp", "list"],
       process.cwd(),
       environment,
     );
-    const effectiveConfig = JSON.parse(config.stdout) as unknown;
     const mcpOutput = `${mcpList.stdout}\n${mcpList.stderr}`;
 
     for (const { name } of agents.agents) {
@@ -314,11 +662,12 @@ async function main(): Promise<void> {
     const upgradePrompt = String(upgrade.prompt);
     assert.equal(upgrade.mode, "primary");
     expectIncludes(upgradePrompt, "## OpenCode host compatibility");
-    assert.equal(upgrade.permission?.task, "allow");
     expectIncludes(
       upgradePrompt,
-      "task` returns the worker result directly and synchronously",
+      "Before an agent's first `Upgrade_<tool>` call in an OpenCode session",
     );
+    assert.equal(upgrade.permission?.task, "allow");
+    expectIncludes(upgradePrompt, "start_task`: returns the task content");
     assert.ok(
       upgradePrompt.indexOf("Collect the result with **one long-wait") <
         upgradePrompt.indexOf("This supersedes any preceding background"),
@@ -330,6 +679,10 @@ async function main(): Promise<void> {
       sampling: "ask",
       task: "allow",
       Upgrade_open_dashboard: "deny",
+      enable_upgrade_mcp: "allow",
+      disable_upgrade_mcp: "allow",
+      get_upgrade_mcp_status: "allow",
+      list_upgrade_mcp_tools: "allow",
     };
     for (const [permission, expected] of Object.entries(
       expectedUpgradePermissions,
@@ -340,7 +693,7 @@ async function main(): Promise<void> {
     assert.equal(worker.hidden, true);
     expectIncludes(
       String(worker.prompt),
-      "task` returns the worker result directly",
+      "run the build/tests, absorb the huge log, and return only the verdict",
     );
     assertBundledExternalDirectory(worker);
     assert.equal(unrelated.permission?.sampling, "ask");
