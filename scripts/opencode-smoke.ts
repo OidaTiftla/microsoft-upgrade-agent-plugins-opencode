@@ -257,8 +257,9 @@ function startServer(
       "127.0.0.1",
       "--port",
       String(port),
+      "--print-logs",
       "--log-level",
-      "WARN",
+      "DEBUG",
     ],
     environment,
   );
