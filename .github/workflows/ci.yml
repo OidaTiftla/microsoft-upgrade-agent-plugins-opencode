@@ -27,7 +27,8 @@ jobs:
         with:
           dotnet-version: 10.x
       - run: npm ci
-      - run: npm install --global opencode-ai@1.18.21
+      - run: >-
+          node -e "const { execFileSync } = require('node:child_process'); const version = require('./package.json').dependencies['@opencode-ai/plugin']; const args = ['install', '--global', 'opencode-ai@' + version]; const windows = process.platform === 'win32'; execFileSync(windows ? process.env.ComSpec || 'cmd.exe' : 'npm', windows ? ['/d', '/s', '/c', 'npm.cmd', ...args] : args, { stdio: 'inherit' })"
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm run test:plugin
@@ -53,7 +54,8 @@ jobs:
         with:
           dotnet-version: 10.x
       - run: npm ci
-      - run: npm install --global opencode-ai@1.18.21
+      - run: >-
+          node -e "const { execFileSync } = require('node:child_process'); const version = require('./package.json').dependencies['@opencode-ai/plugin']; const args = ['install', '--global', 'opencode-ai@' + version]; const windows = process.platform === 'win32'; execFileSync(windows ? process.env.ComSpec || 'cmd.exe' : 'npm', windows ? ['/d', '/s', '/c', 'npm.cmd', ...args] : args, { stdio: 'inherit' })"
       - run: npm run test:opencode
 
   publish:
