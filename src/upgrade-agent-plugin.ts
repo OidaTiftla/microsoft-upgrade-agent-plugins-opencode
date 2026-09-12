@@ -50,6 +50,10 @@ import {
   type ExecuteUpgradeCoreTool,
   type UpgradeMcpProxyEndpoint,
 } from "./upgrade-mcp-proxy-transport.ts";
+import {
+  logPluginLoadFailure,
+  logPluginLoadState,
+} from "./plugin-diagnostics.ts";
 
 const MCP_NAME = "Upgrade";
 const MCP_TIMEOUT_MS = 3_600_000;
@@ -175,10 +179,13 @@ export async function createUpgradeAgentPlugin(
     warn: (message) => console.warn(message),
   },
 ): Promise<Hooks> {
+  logPluginLoadState("checking prerequisites");
   const pluginOptions = getPluginOptions(options);
   const diagnostics = await dependencies.diagnose();
   if (!diagnostics.isReady) throw getPrerequisiteError(diagnostics);
+  logPluginLoadState("prerequisites ready; converting bundled agents");
   const conversion = await dependencies.convertAgents();
+  logPluginLoadState("bundled agents converted; hooks ready");
   const registry = new UpgradeInvocationRegistry();
   const contexts = new Map<string, ToolContext>();
   const initializationAbort = new AbortController();
@@ -456,18 +463,25 @@ export async function createUpgradeAgentPlugin(
   };
   return {
     config: async (config) => {
-      if (disposed) throw new Error("Upgrade plugin was disposed.");
-      ensureNoMcpConflict(config);
-      ensureNoAgentConflicts(config, conversion.agents);
-      ensureNoSamplingAgentConflict(config);
-      registerSamplingAgent(config);
-      registerConvertedAgents(config, conversion.agents, BUNDLED_PLUGIN_ROOT);
-      if (pluginOptions.sampling === "ask")
-        registerSamplingAskPermissions(config);
-      smallModel = config.small_model;
-      if (!warningsEmitted && conversion.diagnostics.length > 0) {
-        dependencies.warn(formatConversionWarnings(conversion.diagnostics));
-        warningsEmitted = true;
+      try {
+        if (disposed) throw new Error("Upgrade plugin was disposed.");
+        logPluginLoadState("registering configuration");
+        ensureNoMcpConflict(config);
+        ensureNoAgentConflicts(config, conversion.agents);
+        ensureNoSamplingAgentConflict(config);
+        registerSamplingAgent(config);
+        registerConvertedAgents(config, conversion.agents, BUNDLED_PLUGIN_ROOT);
+        if (pluginOptions.sampling === "ask")
+          registerSamplingAskPermissions(config);
+        smallModel = config.small_model;
+        if (!warningsEmitted && conversion.diagnostics.length > 0) {
+          dependencies.warn(formatConversionWarnings(conversion.diagnostics));
+          warningsEmitted = true;
+        }
+        logPluginLoadState("configuration registered");
+      } catch (error) {
+        logPluginLoadFailure("configuration registration", error);
+        throw error;
       }
     },
     "chat.params": sampling.applyChatParams,

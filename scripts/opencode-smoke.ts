@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, readdir, rm } from "node:fs/promises";
 import { createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
@@ -193,6 +193,54 @@ function getPackedTarball(output: string, directory: string): string {
   if (typeof filename !== "string")
     throw new Error("npm pack did not report a package filename.");
   return join(directory, filename);
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getDirectoryEntries(directory: string): Promise<string> {
+  try {
+    const entries = await readdir(directory);
+    return entries.length === 0 ? "none" : entries.join(", ");
+  } catch {
+    return "unavailable";
+  }
+}
+
+async function getOpenCodeDependencyStatus(
+  environment: NodeJS.ProcessEnv,
+): Promise<string> {
+  const configHome = environment.XDG_CONFIG_HOME;
+  if (configHome === undefined) return "unavailable: XDG_CONFIG_HOME is unset";
+  const directories = [join(configHome, "opencode")];
+  if (environment.OPENCODE_CONFIG_DIR !== undefined)
+    directories.push(environment.OPENCODE_CONFIG_DIR);
+  const dependencyDirectories = (
+    await Promise.all(
+      directories.map(async (directory) => {
+        const nodeModules = join(directory, "node_modules");
+        const plugin = join(
+          nodeModules,
+          "@opencode-ai",
+          "plugin",
+          "package.json",
+        );
+        return `${directory}: node_modules=${await pathExists(nodeModules)}, plugin=${await pathExists(plugin)}`;
+      }),
+    )
+  ).join("\n");
+  const stateHome = environment.XDG_STATE_HOME;
+  const locks =
+    stateHome === undefined
+      ? "unavailable: XDG_STATE_HOME is unset"
+      : await getDirectoryEntries(join(stateHome, "opencode", "locks"));
+  return `${dependencyDirectories}\ninstall locks: ${locks}`;
 }
 
 function getEffectiveAgent(config: unknown, name: string): EffectiveAgent {
@@ -464,11 +512,13 @@ async function getEffectiveConfig(
       await response.body?.cancel();
       await delay(POLL_INTERVAL_MS);
     }
+    const dependencyStatus = await getOpenCodeDependencyStatus(environment);
     throw new Error(
       [
         `OpenCode config API was not ready after ${SERVER_READY_TIMEOUT_MS}ms.`,
         `requests: ${attempts}, timed out: ${requestTimeouts}, last duration: ${lastRequestDurationMs}ms`,
         `last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+        `dependency status:\n${dependencyStatus}`,
         getServerStatus(server),
         `server output:\n${server.output()}`,
       ].join("\n"),
@@ -589,6 +639,7 @@ async function main(): Promise<void> {
       OPENCODE_DISABLE_AUTOCOMPACT: "1",
       OPENCODE_DISABLE_MODELS_FETCH: "1",
       OPENCODE_AUTH_CONTENT: "{}",
+      OPENCODE_UPGRADE_AGENT_DIAGNOSTICS: "1",
     };
     const effectiveConfig = await getEffectiveConfig(environment);
     const mcpList = await expectCommand(
