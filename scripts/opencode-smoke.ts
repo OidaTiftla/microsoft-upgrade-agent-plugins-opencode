@@ -343,6 +343,40 @@ async function waitForServerReady(server: RunningServer): Promise<void> {
   );
 }
 
+async function probeServerHttp(
+  server: RunningServer,
+  port: number,
+): Promise<void> {
+  const requestStartedAt = Date.now();
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  let response: Response | undefined;
+  try {
+    response = await fetch(`http://127.0.0.1:${port}/doc`, {
+      signal: timeout,
+    });
+    if (!response.ok)
+      throw new Error(
+        `HTTP ${response.status} ${response.statusText} from the OpenCode documentation endpoint.`,
+      );
+    process.stdout.write(
+      `opencode smoke: HTTP probe succeeded in ${Date.now() - requestStartedAt}ms\n`,
+    );
+  } catch (error) {
+    throw new Error(
+      [
+        "OpenCode server did not respond to an HTTP probe before config loading.",
+        `request duration: ${Date.now() - requestStartedAt}ms`,
+        `request timed out: ${timeout.aborted}`,
+        `error: ${error instanceof Error ? error.message : String(error)}`,
+        getServerStatus(server),
+        `server output:\n${server.output()}`,
+      ].join("\n"),
+    );
+  } finally {
+    await response?.body?.cancel();
+  }
+}
+
 async function stopServer(server: RunningServer): Promise<void> {
   if (serverHasExited(server)) return;
   terminate(server.child, "SIGTERM");
@@ -394,6 +428,7 @@ async function getEffectiveConfig(
   const server = startServer(port, environment);
   try {
     await waitForServerReady(server);
+    await probeServerHttp(server, port);
     const url = `http://127.0.0.1:${port}/config`;
     const deadline = Date.now() + SERVER_READY_TIMEOUT_MS;
     let attempts = 0;
