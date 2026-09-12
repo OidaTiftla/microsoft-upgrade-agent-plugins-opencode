@@ -640,6 +640,7 @@ async function main(): Promise<void> {
       OPENCODE_DISABLE_MODELS_FETCH: "1",
       OPENCODE_AUTH_CONTENT: "{}",
       OPENCODE_UPGRADE_AGENT_DIAGNOSTICS: "1",
+      NPM_CONFIG_AUDIT: "false",
     };
     const effectiveConfig = await getEffectiveConfig(environment);
     const mcpList = await expectCommand(
