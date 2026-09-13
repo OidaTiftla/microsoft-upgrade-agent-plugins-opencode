@@ -7,6 +7,9 @@
     "url": "git+https://github.com/OidaTiftla/microsoft-upgrade-agent-plugins-opencode.git"
   },
   "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "exports": {
     "./server": "./src/index.ts"
   },

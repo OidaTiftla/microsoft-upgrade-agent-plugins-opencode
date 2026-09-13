@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ToolContext } from "@opencode-ai/plugin";
+import type { PluginInput, ToolContext } from "@opencode-ai/plugin";
 import type { AssistantMessage, Part } from "@opencode-ai/sdk";
 import type { CreateMessageRequest } from "@modelcontextprotocol/sdk/types.js";
 
 import {
   OpenCodeSamplingAdapter,
+  createOpenCodeSamplingSdkClient,
   type SamplingSdkClient,
 } from "../src/opencode-sampling-adapter.ts";
 import { SAMPLING_AGENT_NAME } from "../src/sampling-agent.ts";
@@ -97,6 +98,77 @@ function client(): {
     calls,
   };
 }
+
+test("createOpenCodeSamplingSdkClient_MissingErrorDetails_Expect_OperationAndFallback", async () => {
+  // Arrange
+  const calls: unknown[] = [];
+  const errorDetails = [undefined, false];
+  const client = {
+    session: {
+      messages: async (input: unknown) => {
+        calls.push(input);
+        return { error: errorDetails[calls.length - 1] };
+      },
+    },
+  } as unknown as PluginInput["client"];
+  const sdk = createOpenCodeSamplingSdkClient(client);
+  const input = {
+    path: { id: "parent" },
+    query: { directory: "/workspace" },
+  };
+
+  // Act
+  const actions = errorDetails.map(() => sdk.session.messages(input));
+
+  // Assert
+  for (const action of actions) {
+    await assert.rejects(
+      action,
+      new Error(
+        "OpenCode SDK session.messages request failed: no error details",
+      ),
+    );
+  }
+  assert.deepEqual(calls, [
+    {
+      path: { id: "parent" },
+      query: { directory: "/workspace" },
+      throwOnError: true,
+    },
+    {
+      path: { id: "parent" },
+      query: { directory: "/workspace" },
+      throwOnError: true,
+    },
+  ]);
+});
+
+test("createOpenCodeSamplingSdkClient_RejectedRequest_Expect_Operation", async () => {
+  // Arrange
+  const client = {
+    session: {
+      messages: async () => {
+        throw new Error("session not found");
+      },
+    },
+  } as unknown as PluginInput["client"];
+  const sdk = createOpenCodeSamplingSdkClient(client);
+
+  // Act
+  const action = () =>
+    sdk.session.messages({
+      path: { id: "parent" },
+      query: { directory: "/workspace" },
+    });
+
+  // Assert
+  await assert.rejects(
+    action,
+    new Error(
+      "OpenCode SDK session.messages request failed: Error: session not found",
+    ),
+  );
+});
 
 test("OpenCodeSamplingAdapter_AskPolicy_Expect_ApprovalAndCleanup", async () => {
   // Arrange

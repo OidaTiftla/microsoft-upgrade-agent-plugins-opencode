@@ -17,11 +17,15 @@ const executableNames: readonly McpPrerequisite[] = [
 function createRunner(
   availableExecutables: readonly McpPrerequisite[],
   dotnetVersion = "10.0.100",
+  nodeVersion = "v22.18.0",
 ): PrerequisiteCommandRunner {
   return {
     isExecutableAvailable: async (executable) =>
       availableExecutables.includes(executable as McpPrerequisite),
-    run: async () => ({ succeeded: true, stdout: dotnetVersion }),
+    run: async (command) => ({
+      succeeded: true,
+      stdout: command === "node" ? nodeVersion : dotnetVersion,
+    }),
   };
 }
 
@@ -46,11 +50,52 @@ test("diagnoseMcpPrerequisites_MissingExecutable_Expect_ActionableDiagnostic", a
           remediation:
             executable === "dnx" || executable === "dotnet"
               ? "Install the .NET SDK 10 or later and ensure it is available on PATH."
-              : `Install Node.js, including ${executable}, and ensure it is available on PATH.`,
+              : "Install Node.js 22.18.0 or later and ensure node and npx are available on PATH.",
         },
       ]);
     });
   }
+});
+
+test("diagnoseMcpPrerequisites_OldNodeRuntime_Expect_ActionableDiagnostic", async () => {
+  // Arrange
+  const runner = createRunner(executableNames, "10.0.100", "v22.17.1");
+
+  // Act
+  const result = await diagnoseMcpPrerequisites(runner);
+
+  // Assert
+  assert.equal(result.isReady, false);
+  assert.deepEqual(result.diagnostics, [
+    {
+      prerequisite: "node",
+      status: "unsupported-version",
+      message:
+        "Detected Node.js v22.17.1, but version 22.18.0 or later is required.",
+      remediation:
+        "Install Node.js 22.18.0 or later and ensure node and npx are available on PATH.",
+    },
+  ]);
+});
+
+test("diagnoseMcpPrerequisites_UnreadableNodeRuntime_Expect_ActionableDiagnostic", async () => {
+  // Arrange
+  const runner = createRunner(executableNames, "10.0.100", "unknown");
+
+  // Act
+  const result = await diagnoseMcpPrerequisites(runner);
+
+  // Assert
+  assert.equal(result.isReady, false);
+  assert.deepEqual(result.diagnostics, [
+    {
+      prerequisite: "node",
+      status: "unavailable",
+      message: "Could not determine the installed Node.js version.",
+      remediation:
+        "Install Node.js 22.18.0 or later and ensure node --version succeeds.",
+    },
+  ]);
 });
 
 test("diagnoseMcpPrerequisites_OldDotnetSdk_Expect_ActionableDiagnostic", async () => {
