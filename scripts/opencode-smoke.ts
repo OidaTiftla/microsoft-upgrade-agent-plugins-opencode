@@ -16,6 +16,7 @@ const POLL_INTERVAL_MS = 100;
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_CONFIG_OUTPUT_BYTES = 16 * 1024 * 1024;
+const MAX_ERROR_RESPONSE_BYTES = 16 * 1024;
 const SERVER_OUTPUT_PREFIX = "opencode server: ";
 const TEMPORARY_DIRECTORY_REMOVAL_RETRIES = 5;
 
@@ -458,9 +459,12 @@ async function stopServer(server: RunningServer): Promise<void> {
     throw new Error("OpenCode server did not exit after SIGKILL.");
 }
 
-async function readBoundedResponse(response: Response): Promise<string> {
+async function readBoundedResponse(
+  response: Response,
+  maxOutputBytes = MAX_CONFIG_OUTPUT_BYTES,
+): Promise<string> {
   const contentLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(contentLength) && contentLength > MAX_CONFIG_OUTPUT_BYTES)
+  if (Number.isFinite(contentLength) && contentLength > maxOutputBytes)
     throw new Error("OpenCode config API response exceeded the output limit.");
   if (response.body === null) return "";
   const reader = response.body.getReader();
@@ -471,7 +475,7 @@ async function readBoundedResponse(response: Response): Promise<string> {
       const { done, value } = await reader.read();
       if (done) break;
       bytes += value.byteLength;
-      if (bytes > MAX_CONFIG_OUTPUT_BYTES) {
+      if (bytes > maxOutputBytes) {
         await reader.cancel();
         throw new Error(
           "OpenCode config API response exceeded the output limit.",
@@ -522,10 +526,15 @@ async function getEffectiveConfig(
         const body = await readBoundedResponse(response);
         return JSON.parse(body) as unknown;
       }
+      let body: string;
+      try {
+        body = await readBoundedResponse(response, MAX_ERROR_RESPONSE_BYTES);
+      } catch (error) {
+        body = `unavailable: ${error instanceof Error ? error.message : String(error)}`;
+      }
       lastError = new Error(
-        `Config API returned HTTP ${response.status} ${response.statusText}.`,
+        `Config API returned HTTP ${response.status} ${response.statusText}: ${body}`,
       );
-      await response.body?.cancel();
       await delay(POLL_INTERVAL_MS);
     }
     const dependencyStatus = await getOpenCodeDependencyStatus(environment);
