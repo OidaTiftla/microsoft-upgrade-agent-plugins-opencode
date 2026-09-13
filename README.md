@@ -2,6 +2,10 @@
 
 `opencode-microsoft-upgrade-agent` brings Microsoft Upgrade Agent workflows to OpenCode. It supports .NET and TypeScript/JavaScript upgrades through the Core `Upgrade` MCP and bundled extenders.
 
+## Pull Updates from Upstream
+
+Create new Pull-Request from Upstream to this repo: https://github.com/OidaTiftla/microsoft-upgrade-agent-plugins-opencode/compare/main...microsoft:upgrade-agent-plugins:main
+
 ## Install and restart OpenCode
 
 Install the npm package, then restart OpenCode so it reloads the plugin configuration.
