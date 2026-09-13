@@ -17,6 +17,7 @@ const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_CONFIG_OUTPUT_BYTES = 16 * 1024 * 1024;
 const SERVER_OUTPUT_PREFIX = "opencode server: ";
+const TEMPORARY_DIRECTORY_REMOVAL_RETRIES = 5;
 
 interface CommandResult {
   readonly command: string;
@@ -272,6 +273,21 @@ function expectIncludes(output: string, expected: string): void {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function removeTemporaryDirectory(directory: string): Promise<void> {
+  try {
+    await rm(directory, {
+      recursive: true,
+      force: true,
+      maxRetries: TEMPORARY_DIRECTORY_REMOVAL_RETRIES,
+      retryDelay: POLL_INTERVAL_MS,
+    });
+  } catch (error) {
+    process.stderr.write(
+      `opencode smoke: could not remove temporary directory ${directory}: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+  }
 }
 
 async function getAvailablePort(): Promise<number> {
@@ -713,7 +729,7 @@ async function main(): Promise<void> {
       })}\n`,
     );
   } finally {
-    await rm(home, { recursive: true, force: true });
+    await removeTemporaryDirectory(home);
   }
 }
 
