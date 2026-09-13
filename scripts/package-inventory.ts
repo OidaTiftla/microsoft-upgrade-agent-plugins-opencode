@@ -2,9 +2,8 @@ import { readdir } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 
 const AGENTS_DIRECTORY = "plugins/upgrade-agent/agents";
-const EXTENDERS_DIRECTORY = "plugins/upgrade-agent/extenders";
-const SKILLS_DIRECTORY = "plugins/upgrade-agent/upgrade/skills";
-const RUNTIME_DIRECTORIES = ["src", EXTENDERS_DIRECTORY, SKILLS_DIRECTORY];
+const UPGRADE_DIRECTORY = "plugins/upgrade-agent/upgrade";
+const RUNTIME_DIRECTORIES = ["src", UPGRADE_DIRECTORY];
 
 async function listFiles(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true });
