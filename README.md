@@ -4,7 +4,14 @@
 
 ## Pull Updates from Upstream
 
-Create new Pull-Request from Upstream to this repo: https://github.com/OidaTiftla/microsoft-upgrade-agent-plugins-opencode/compare/main...microsoft:upgrade-agent-plugins:main
+```bash
+git remote add upstream git@github.com:microsoft/upgrade-agent-plugins.git
+git fetch upstream
+git branch upstream-main upstream/main
+git push origin upstream-main -u
+```
+
+Then create a Pull-Request from `upstream-main`.
 
 ## Install and restart OpenCode
 
