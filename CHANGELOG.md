@@ -2,6 +2,17 @@
 
 All notable changes to the OpenCode Microsoft Upgrade Agent adapter are documented in this file. Upstream Microsoft Upgrade Agent workflow, skill, and extender changes are not tracked here.
 
+## [0.1.1] - 2026-08-30
+
+### Fixed
+
+- Exposed the `./server` package entry point required for OpenCode to load the plugin.
+
+### Changed
+
+- Updated the OpenCode plugin and MCP SDK dependencies.
+- Updated the bundled TypeScript/JavaScript Upgrade MCP compatibility set.
+
 ## [0.1.0] - 2026-08-30
 
 ### Added
