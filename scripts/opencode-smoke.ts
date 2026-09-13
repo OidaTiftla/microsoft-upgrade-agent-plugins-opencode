@@ -12,6 +12,7 @@ const SAMPLING_AGENT_NAME = "UpgradeSampler";
 const COMMAND_TIMEOUT_MS = 300_000;
 const TERMINATION_GRACE_MS = 5_000;
 const SERVER_READY_TIMEOUT_MS = 30_000;
+const CONFIG_READY_TIMEOUT_MS = 180_000;
 const POLL_INTERVAL_MS = 100;
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
@@ -498,7 +499,7 @@ async function getEffectiveConfig(
     await waitForServerReady(server);
     await probeServerHttp(server, port);
     const url = `http://127.0.0.1:${port}/config`;
-    const deadline = Date.now() + SERVER_READY_TIMEOUT_MS;
+    const deadline = Date.now() + CONFIG_READY_TIMEOUT_MS;
     let attempts = 0;
     let lastError: unknown;
     let lastRequestDurationMs = 0;
@@ -540,7 +541,7 @@ async function getEffectiveConfig(
     const dependencyStatus = await getOpenCodeDependencyStatus(environment);
     throw new Error(
       [
-        `OpenCode config API was not ready after ${SERVER_READY_TIMEOUT_MS}ms.`,
+        `OpenCode config API was not ready after ${CONFIG_READY_TIMEOUT_MS}ms.`,
         `requests: ${attempts}, timed out: ${requestTimeouts}, last duration: ${lastRequestDurationMs}ms`,
         `last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
         `dependency status:\n${dependencyStatus}`,
