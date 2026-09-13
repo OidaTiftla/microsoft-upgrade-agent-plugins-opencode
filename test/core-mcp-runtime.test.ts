@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { tool, type ToolContext } from "@opencode-ai/plugin";
+import type { ToolContext } from "@opencode-ai/plugin";
 import type {
   CreateMessageRequest,
   CreateMessageResult,
@@ -9,13 +9,10 @@ import type {
 
 import {
   CoreToolExecutionCoordinator,
-  createOpenCodeMcpToolDefinitions,
-  createToolDefinitionHook,
-  getOpenCodeToolResult,
   waitForStableMcpTools,
   type CoreMcpToolClient,
   type SamplingAdapter,
-} from "../src/opencode-mcp-tool-bridge.ts";
+} from "../src/core-mcp-runtime.ts";
 
 function context(sessionID: string): ToolContext {
   return {
@@ -46,151 +43,6 @@ function sampling(): SamplingAdapter {
     }),
   };
 }
-
-test("getOpenCodeToolResult_ErrorResult_Expect_PreservesErrorStatus", () => {
-  // Arrange
-  const result = {
-    content: [{ text: "Core failed", type: "text" }],
-    isError: true,
-  };
-
-  // Act
-  const action = () => getOpenCodeToolResult("Upgrade_get_state", result);
-
-  // Assert
-  assert.throws(action, /Upgrade_get_state failed: Core failed/);
-});
-
-test("createToolDefinitionHook_FutureSchema_Expect_PreservesOriginalSchema", async () => {
-  // Arrange
-  const inputSchema = {
-    properties: {
-      path: { "x-future-property": ["value"], type: "string" },
-    },
-    required: ["path"],
-    type: "object",
-  };
-  const output = { description: "Generated", parameters: {} } as {
-    description: string;
-    jsonSchema?: unknown;
-    parameters: unknown;
-  };
-
-  // Act
-  await createToolDefinitionHook({ Upgrade_get_state: inputSchema })(
-    { toolID: "Upgrade_get_state" },
-    output,
-  );
-
-  // Assert
-  assert.equal(output.jsonSchema, inputSchema);
-});
-
-test("createOpenCodeMcpToolDefinitions_TopLevelArguments_Expect_RequiredAndOptional", async () => {
-  // Arrange
-  const calls: unknown[] = [];
-  const definitions = createOpenCodeMcpToolDefinitions(
-    "Upgrade",
-    [
-      {
-        inputSchema: {
-          additionalProperties: true,
-          properties: { optional: {}, required: {} },
-          required: ["required"],
-          type: "object",
-        },
-        name: "get_state",
-      },
-    ],
-    new CoreToolExecutionCoordinator(
-      {
-        callTool: async (name, arguments_) => {
-          calls.push({ arguments_, name });
-          return { content: [] };
-        },
-        listTools: async () => ({ tools: [] }),
-      },
-      sampling(),
-    ),
-  );
-  const schema = tool.schema.object(definitions.Upgrade_get_state.args);
-
-  // Act
-  const missing = schema.safeParse({});
-  const undefinedRequired = schema.safeParse({ required: undefined });
-  const valid = schema.safeParse({ required: { nested: "unchanged" } });
-  const undefinedOptional = schema.safeParse({
-    optional: undefined,
-    required: "value",
-  });
-  await definitions.Upgrade_get_state.execute(
-    { future: { property: "preserved" }, required: "value" },
-    context("one"),
-  );
-
-  // Assert
-  assert.equal(missing.success, false);
-  assert.equal(undefinedRequired.success, false);
-  assert.equal(valid.success, true);
-  assert.equal(undefinedOptional.success, true);
-  assert.deepEqual(calls, [
-    {
-      arguments_: { future: { property: "preserved" }, required: "value" },
-      name: "get_state",
-    },
-  ]);
-});
-
-test("createOpenCodeMcpToolDefinitions_ToolPermission_Expect_AsksBeforeDispatch", async (t) => {
-  for (const [policy, ask] of [
-    ["allow", async () => undefined],
-    ["ask", async () => undefined],
-    ["deny", async () => Promise.reject(new Error("Denied"))],
-  ] as const) {
-    await t.test(policy, async () => {
-      // Arrange
-      const calls: unknown[] = [];
-      const permissions: unknown[] = [];
-      const definitions = createOpenCodeMcpToolDefinitions(
-        "Upgrade",
-        [{ inputSchema: { type: "object" }, name: "get_state" }],
-        new CoreToolExecutionCoordinator(
-          {
-            callTool: async (...arguments_) => {
-              calls.push(arguments_);
-              return { content: [] };
-            },
-            listTools: async () => ({ tools: [] }),
-          },
-          sampling(),
-        ),
-      );
-      const toolContext = {
-        ...context("session"),
-        ask: async (input: Parameters<ToolContext["ask"]>[0]) => {
-          permissions.push(input);
-          await ask();
-        },
-      };
-
-      // Act
-      const action = definitions.Upgrade_get_state.execute({}, toolContext);
-
-      // Assert
-      if (policy === "deny") await assert.rejects(action, /Denied/);
-      else await action;
-      assert.deepEqual(permissions, [
-        {
-          always: ["*"],
-          metadata: {},
-          patterns: ["*"],
-          permission: "Upgrade_get_state",
-        },
-      ]);
-      assert.equal(calls.length, policy === "deny" ? 0 : 1);
-    });
-  }
-});
 
 test("waitForStableMcpTools_QuietPeriod_Expect_UsesNotificationsAndPolling", async () => {
   // Arrange

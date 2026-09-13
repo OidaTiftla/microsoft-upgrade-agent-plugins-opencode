@@ -10,6 +10,12 @@ import { SAMPLING_AGENT_NAME } from "./sampling-agent.ts";
 export type SamplingPolicy = "ask" | "allow" | "deny";
 type Model = { providerID: string; modelID: string };
 type SessionRequest = { path: { id: string }; query: { directory: string } };
+type SamplingSdkOperation =
+  | "session.messages"
+  | "session.create"
+  | "session.prompt"
+  | "session.abort"
+  | "session.delete";
 
 export interface SamplingSdkClient {
   readonly session: {
@@ -45,9 +51,28 @@ export interface SamplingAdapterOptions {
   readonly policy?: SamplingPolicy;
 }
 
-function getResponseData<T>(response: { data?: T; error?: unknown }): T {
-  if (response.data !== undefined) return response.data;
-  throw new Error(`OpenCode SDK request failed: ${String(response.error)}`);
+function getErrorDetails(error: unknown): string {
+  return error === undefined || typeof error === "boolean"
+    ? "no error details"
+    : String(error);
+}
+
+async function getResponseData<T>(
+  operation: SamplingSdkOperation,
+  response: Promise<{ data?: T; error?: unknown }>,
+): Promise<T> {
+  let result: { data?: T; error?: unknown };
+  try {
+    result = await response;
+  } catch (error) {
+    throw new Error(
+      `OpenCode SDK ${operation} request failed: ${getErrorDetails(error)}`,
+    );
+  }
+  if (result.data !== undefined) return result.data;
+  throw new Error(
+    `OpenCode SDK ${operation} request failed: ${getErrorDetails(result.error)}`,
+  );
 }
 
 export function createOpenCodeSamplingSdkClient(
@@ -56,15 +81,30 @@ export function createOpenCodeSamplingSdkClient(
   return {
     session: {
       messages: async (input) =>
-        getResponseData(await client.session.messages(input)),
+        getResponseData(
+          "session.messages",
+          client.session.messages({ ...input, throwOnError: true }),
+        ),
       create: async (input) =>
-        getResponseData(await client.session.create(input)),
+        getResponseData(
+          "session.create",
+          client.session.create({ ...input, throwOnError: true }),
+        ),
       prompt: async (input) =>
-        getResponseData(await client.session.prompt(input)),
+        getResponseData(
+          "session.prompt",
+          client.session.prompt({ ...input, throwOnError: true }),
+        ),
       abort: async (input) =>
-        getResponseData(await client.session.abort(input)),
+        getResponseData(
+          "session.abort",
+          client.session.abort({ ...input, throwOnError: true }),
+        ),
       delete: async (input) =>
-        getResponseData(await client.session.delete(input)),
+        getResponseData(
+          "session.delete",
+          client.session.delete({ ...input, throwOnError: true }),
+        ),
     },
   };
 }

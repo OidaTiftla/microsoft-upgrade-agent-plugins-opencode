@@ -32,26 +32,28 @@ interface PrerequisiteDefinition {
   readonly remediation: string;
 }
 
+const NODE_MINIMUM_VERSION = [22, 18, 0] as const;
+const NODE_REMEDIATION =
+  "Install Node.js 22.18.0 or later and ensure node and npx are available on PATH.";
+const DOTNET_REMEDIATION =
+  "Install the .NET SDK 10 or later and ensure it is available on PATH.";
+
 const prerequisiteDefinitions: readonly PrerequisiteDefinition[] = [
   {
     prerequisite: "dnx",
-    remediation:
-      "Install the .NET SDK 10 or later and ensure it is available on PATH.",
+    remediation: DOTNET_REMEDIATION,
   },
   {
     prerequisite: "dotnet",
-    remediation:
-      "Install the .NET SDK 10 or later and ensure it is available on PATH.",
+    remediation: DOTNET_REMEDIATION,
   },
   {
     prerequisite: "node",
-    remediation:
-      "Install Node.js, including node, and ensure it is available on PATH.",
+    remediation: NODE_REMEDIATION,
   },
   {
     prerequisite: "npx",
-    remediation:
-      "Install Node.js, including npx, and ensure it is available on PATH.",
+    remediation: NODE_REMEDIATION,
   },
 ];
 
@@ -123,6 +125,38 @@ function createDotnetVersionDiagnostic(
   };
 }
 
+function createUnreadableNodeVersionDiagnostic(): McpPrerequisiteDiagnostic {
+  return {
+    prerequisite: "node",
+    status: "unavailable",
+    message: "Could not determine the installed Node.js version.",
+    remediation:
+      "Install Node.js 22.18.0 or later and ensure node --version succeeds.",
+  };
+}
+
+function createNodeVersionDiagnostic(
+  version: string,
+): McpPrerequisiteDiagnostic | undefined {
+  const normalizedVersion = version.trim();
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(normalizedVersion);
+  if (match === null) return createUnreadableNodeVersionDiagnostic();
+  const installed = match.slice(1).map(Number);
+  const difference = installed.findIndex(
+    (part, index) => part !== NODE_MINIMUM_VERSION[index],
+  );
+  const isSupported =
+    difference === -1 ||
+    installed[difference]! > NODE_MINIMUM_VERSION[difference]!;
+  if (isSupported) return undefined;
+  return {
+    prerequisite: "node",
+    status: "unsupported-version",
+    message: `Detected Node.js ${normalizedVersion}, but version 22.18.0 or later is required.`,
+    remediation: NODE_REMEDIATION,
+  };
+}
+
 export async function diagnoseMcpPrerequisites(
   runner: PrerequisiteCommandRunner = systemPrerequisiteCommandRunner,
 ): Promise<McpPrerequisiteDiagnostics> {
@@ -137,22 +171,29 @@ export async function diagnoseMcpPrerequisites(
     .map(({ definition }) => createMissingDiagnostic(definition));
 
   if (
-    !availability.find(({ definition }) => definition.prerequisite === "dotnet")
+    availability.find(({ definition }) => definition.prerequisite === "dotnet")
       ?.isAvailable
   ) {
-    return { isReady: false, diagnostics };
+    const dotnetVersion = await runner.run("dotnet", ["--version"]);
+    if (!dotnetVersion.succeeded) {
+      diagnostics.push(createUnreadableDotnetVersionDiagnostic());
+    } else {
+      const versionDiagnostic = createDotnetVersionDiagnostic(
+        dotnetVersion.stdout,
+      );
+      if (versionDiagnostic !== undefined) diagnostics.push(versionDiagnostic);
+    }
   }
 
-  const dotnetVersion = await runner.run("dotnet", ["--version"]);
-  if (!dotnetVersion.succeeded) {
-    diagnostics.push(createUnreadableDotnetVersionDiagnostic());
-  } else {
-    const versionDiagnostic = createDotnetVersionDiagnostic(
-      dotnetVersion.stdout,
-    );
-    if (versionDiagnostic !== undefined) {
-      diagnostics.push(versionDiagnostic);
-    }
+  if (
+    availability.find(({ definition }) => definition.prerequisite === "node")
+      ?.isAvailable
+  ) {
+    const nodeVersion = await runner.run("node", ["--version"]);
+    const versionDiagnostic = nodeVersion.succeeded
+      ? createNodeVersionDiagnostic(nodeVersion.stdout)
+      : createUnreadableNodeVersionDiagnostic();
+    if (versionDiagnostic !== undefined) diagnostics.push(versionDiagnostic);
   }
 
   return { isReady: diagnostics.length === 0, diagnostics };

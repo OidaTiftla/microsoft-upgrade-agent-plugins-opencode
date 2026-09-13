@@ -1,12 +1,15 @@
 {
   "name": "opencode-microsoft-upgrade-agent",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "OpenCode adapter for the Microsoft Upgrade Agent workflows.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/OidaTiftla/microsoft-upgrade-agent-plugins-opencode.git"
   },
   "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "exports": {
     "./server": "./src/index.ts"
   },
@@ -30,13 +33,13 @@
     "test:sampling-e2e": "node scripts/sampling-e2e.ts"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "1.18.23",
+    "@opencode-ai/plugin": "1.18.30",
     "@modelcontextprotocol/sdk": "1.30.0",
     "yaml": "2.9.0"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
-    "prettier": "^3.6.0",
-    "typescript": "^5.8.0"
+    "@types/node": "^24.13.4",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3"
   }
 }

@@ -18,6 +18,12 @@ const FILESYSTEM_PERMISSIONS = new Set([
   "grep",
   "read",
 ]);
+const UPGRADE_MCP_HOST_PERMISSIONS = {
+  enable_upgrade_mcp: "allow",
+  disable_upgrade_mcp: "allow",
+  get_upgrade_mcp_status: "allow",
+  list_upgrade_mcp_tools: "allow",
+} as const;
 
 function getPathImplementation(platform: NodeJS.Platform): PathImplementation {
   return platform === "win32" ? win32 : posix;
@@ -52,14 +58,27 @@ function needsBundledFilesystemAccess(
   );
 }
 
+function grantUpgradeMcpHostPermissions(
+  permission: ConvertedAgentDefinition["permission"],
+): ConvertedAgentDefinition["permission"] {
+  if (
+    !Object.entries(permission).some(
+      ([name, value]) => name.startsWith("Upgrade_") && value === "allow",
+    )
+  )
+    return permission;
+  return { ...permission, ...UPGRADE_MCP_HOST_PERMISSIONS };
+}
+
 function getAgentPermission(
   agent: ConvertedAgentDefinition,
   bundledPluginRoot: string,
 ): OpenCodePermission {
+  const permission = grantUpgradeMcpHostPermissions(agent.permission);
   if (!needsBundledFilesystemAccess(agent))
-    return agent.permission as OpenCodePermission;
+    return permission as OpenCodePermission;
   return {
-    ...agent.permission,
+    ...permission,
     external_directory: {
       [getBundledExternalDirectoryPattern(bundledPluginRoot)]: "allow",
     },
