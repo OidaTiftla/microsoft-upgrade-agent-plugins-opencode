@@ -27,10 +27,10 @@ test("getRuntimeAssetPaths_RuntimeSources_Expect_AllRequiredAssets", async () =>
     for (const path of [
       "src/index.ts",
       "plugins/upgrade-agent/agents/upgrade.agent.md",
-      "plugins/upgrade-agent/upgrade/skills/system/generate-report/SKILL.md",
-      "plugins/upgrade-agent/extenders/example/upgrade-extension.json",
-      "plugins/upgrade-agent/extenders/example/upgrade/skills/scenario/SKILL.md",
-      "plugins/upgrade-agent/extenders/example/upgrade/skills/scenario/ref.md",
+      "plugins/upgrade-agent/upgrade/skills/system/post-scenario-completion/SKILL.md",
+      "plugins/upgrade-agent/upgrade/example/upgrade-extension.json",
+      "plugins/upgrade-agent/upgrade/example/skills/scenario/SKILL.md",
+      "plugins/upgrade-agent/upgrade/example/skills/scenario/ref.md",
     ]) {
       await mkdir(dirname(join(root, path)), { recursive: true });
       await writeFile(join(root, path), "source");
@@ -42,10 +42,10 @@ test("getRuntimeAssetPaths_RuntimeSources_Expect_AllRequiredAssets", async () =>
     // Assert
     assert.deepEqual(paths, [
       "plugins/upgrade-agent/agents/upgrade.agent.md",
-      "plugins/upgrade-agent/extenders/example/upgrade-extension.json",
-      "plugins/upgrade-agent/extenders/example/upgrade/skills/scenario/SKILL.md",
-      "plugins/upgrade-agent/extenders/example/upgrade/skills/scenario/ref.md",
-      "plugins/upgrade-agent/upgrade/skills/system/generate-report/SKILL.md",
+      "plugins/upgrade-agent/upgrade/example/skills/scenario/SKILL.md",
+      "plugins/upgrade-agent/upgrade/example/skills/scenario/ref.md",
+      "plugins/upgrade-agent/upgrade/example/upgrade-extension.json",
+      "plugins/upgrade-agent/upgrade/skills/system/post-scenario-completion/SKILL.md",
       "src/index.ts",
     ]);
   } finally {

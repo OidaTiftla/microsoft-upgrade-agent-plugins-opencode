@@ -30,6 +30,20 @@ fix it, and re-validate** — then report a concise fix summary.
   so the Orchestrator can re-dispatch to the full-access worker. This includes a tool the
   **scenario instructions explicitly name** but that is not in your tool list — signal
   blocked naming that tool; never silently skip the step.
+- **Every `execute` call is bounded, observable, and shell-neutral.** You are frequently
+  dispatched *because* a command hung, so you must not reproduce it. Never run a command in
+  the background or leave its output uncaptured; treat one that has emitted nothing for
+  several minutes as **stuck, not slow**, and stop it. A child that inherits stdin
+  (`powershell -Command -`, an interactive `cmd.exe`) blocks forever emitting nothing — pass
+  the script non-interactively so it cannot happen. Write commands on a single line and do
+  not assume a shell: you run in whatever shell the user configured, often Git Bash or WSL,
+  where a trailing `` ` `` or `^` continuation or a `%VAR%` reference breaks or silently
+  misbehaves. To run a `.ps1`, invoke it explicitly
+  (`powershell -NoProfile -ExecutionPolicy Bypass -File <script> -Arg value`).
+- **Three strikes.** If the same command fails the same way three times, stop and report it
+  with the exact command and last output rather than trying a fourth time. Report it as part
+  of your normal outcome, **not** as `STATUS: blocked` — that status means a missing
+  capability and re-routes you to BreakGlass, which cannot help with a stuck command.
 
 ## Inputs you receive (in the dispatched turn)
 
@@ -40,7 +54,10 @@ the files already changed, `scenario-instructions.md`, and any relevant skill pa
 ## What to do
 
 1. **Read** the forwarded context + skills. Load domain guidance as needed with
-   `get_instructions(kind='skill', query='...')`.
+   `get_instructions(kind='skill', query='...')`. Once a failure is yours, also call
+   `get_instructions(kind='scenario-extension', query='Execution')` — it returns "none apply"
+   when there are none. Call it before diagnosing: whether a missing type is a typo or a
+   replaced API is often exactly what it tells you.
 2. **Diagnose** using the broader read tools: dependency-graph analysis (what references
    the broken symbol/unit), symbol/API-shape analysis, assessment queries (known flags),
    and dependency-version lookups (version conflicts). Use feed authentication for

@@ -27,11 +27,20 @@ async function writeExtenderManifest(
   id: string,
   packageName: string,
 ): Promise<void> {
-  const path = join(pluginRoot, "extenders", id, "upgrade-extension.json");
+  const isDotnet = id === "upgrade-dotnet";
+  const path = join(pluginRoot, "upgrade", id, "upgrade-extension.json");
   await mkdir(dirname(path), { recursive: true });
   await writeFile(
     path,
-    JSON.stringify({ id, mcp: { command: "npx", args: ["-y", packageName] } }),
+    JSON.stringify({
+      id,
+      mcp: {
+        command: isDotnet ? "dnx" : "npx",
+        args: isDotnet
+          ? [packageName, "--yes", "--ignore-failed-sources"]
+          : ["-y", packageName, "--mcp"],
+      },
+    }),
   );
 }
 
@@ -91,23 +100,12 @@ test("writeHostDiscoveryFiles_PinnedExtenders_Expect_DerivedManifests", async ()
     ["upgrade-typescript", "@microsoft/jsts-upgrade-assistant"],
   ] as const;
   try {
-    for (const [id, packageName] of sourceManifests) {
-      const path = join(pluginRoot, "extenders", id, "upgrade-extension.json");
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(
-        path,
-        JSON.stringify({
-          id,
-          mcp: {
-            command: id === "upgrade-dotnet" ? "dnx" : "npx",
-            args:
-              id === "upgrade-dotnet"
-                ? [packageName, "--yes", "--ignore-failed-sources"]
-                : ["-y", packageName, "--mcp"],
-          },
-        }),
-      );
-    }
+    await mkdir(join(pluginRoot, "upgrade", "skills"), { recursive: true });
+    await Promise.all(
+      sourceManifests.map(([id, packageName]) =>
+        writeExtenderManifest(pluginRoot, id, packageName),
+      ),
+    );
 
     // Act
     const files = await writeHostDiscoveryFiles(
@@ -123,21 +121,14 @@ test("writeHostDiscoveryFiles_PinnedExtenders_Expect_DerivedManifests", async ()
         extenders: [
           {
             manifestPath: files.extenders[0].manifestPath,
-            skillsRoot: join(
-              pluginRoot,
-              "extenders",
-              "upgrade-dotnet",
-              "upgrade",
-              "skills",
-            ),
+            skillsRoot: join(pluginRoot, "upgrade", "upgrade-dotnet", "skills"),
           },
           {
             manifestPath: files.extenders[1].manifestPath,
             skillsRoot: join(
               pluginRoot,
-              "extenders",
-              "upgrade-typescript",
               "upgrade",
+              "upgrade-typescript",
               "skills",
             ),
           },

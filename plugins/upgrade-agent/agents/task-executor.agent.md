@@ -96,8 +96,11 @@ is **not** sufficient:
 1. **Read the forwarded skills first.** Be generous: if a skill covers ANY part of your
    change, read its `skill.md` before touching code. Skill guidance (tool choice, patterns,
    **ordering**, build/test commands for this stack) is **binding** — follow it as a
-   checklist, don't execute from memory. If you hit something the loaded skills don't cover
-   (an unanticipated technology, or repeated failures a basic fix won't clear),
+   checklist, don't execute from memory. Also call
+   `get_instructions(kind='scenario-extension', query='Execution')` on **every task**; it
+   returns "none apply" when there are none. Apply what it returns like skill guidance.
+   Separately, if you hit something the loaded skills don't cover (an unanticipated
+   technology, or repeated failures a basic fix won't clear),
    `get_instructions(kind='skill', query='<topic>')` mid-task.
 2. **Research → enrich `task.md` — HARD GATE.** Before editing any code, investigate scope
    (affected units, dependencies current → target, patterns) and write your findings into
@@ -180,6 +183,15 @@ is **not** sufficient:
    Definition of done. **No-change short-circuit:** if you produced no file modifications,
    skip the build (a prior green build is still valid) and only re-run tests if you're unsure
    they already passed this session.
+   **Every command is single-line, shell-neutral, bounded, and observable.** You run in
+   whatever shell the *user* configured — often Git Bash or WSL, not PowerShell — so a
+   trailing `` ` `` or `^` continuation, or a `%VAR%` reference, breaks or (worse) exits 0
+   having run nothing. To run a `.ps1`, invoke it explicitly:
+   `powershell -NoProfile -ExecutionPolicy Bypass -File <script> -Arg value`. Never
+   background a command or leave its output uncaptured, and treat a command that has emitted
+   nothing for several minutes as **stuck, not slow** — stop it and report. After a
+   scaffolding or generation command, **verify the artifact exists** rather than trusting the
+   exit code.
 7. **Failure handling — self-dispatch the inner loop, escalate the hard cases.**
    - **Tight inner loop (do it yourself, nested).** For an ordinary build/test failure in
      your task's scope, you may dispatch `BuildValidator` (to pin down what's broken) or

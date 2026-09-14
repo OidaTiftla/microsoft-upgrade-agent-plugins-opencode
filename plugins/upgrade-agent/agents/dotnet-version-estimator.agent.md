@@ -1,6 +1,6 @@
 ---
 name: DotnetVersionEstimator
-description: Single-tool token-budget worker for the dotnet-version-upgrade scenario. Runs predict_token_usage once and returns a ready-to-present budget block. Dispatched only when the user explicitly asks for an estimate.
+description: Estimates the token budget for the dotnet-version-upgrade scenario and returns a ready-to-present budget block. Dispatched only when the user explicitly asks for an estimate.
 user-invocable: false
 model: claude-haiku-4.5
 tools: ['Upgrade/predict_token_usage']
@@ -49,7 +49,7 @@ predict_token_usage(model_ids: ["claude-opus-4.6",       // compare several mode
 ```
 
 Use the canonical lower-cased `<family>-<version>` id (the family keeps any `mini` / `codex` /
-`pro` variant suffix), e.g. `claude-opus-4.6`, `claude-sonnet-4.5`, `gpt-5.4`. When the
+`pro` variant suffix), e.g. `claude-opus-4.6`, `claude-sonnet-5`, `gpt-5.4`. When the
 Orchestrator passed model ids, forward them. When it did not, omit `model_ids` — the two
 reference models (`claude-opus-4.6` + `gpt-5.4`) are forecast so the user gets a side-by-side
 comparison.
