@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export interface McpVersionPin {
@@ -31,6 +31,31 @@ export interface HostDiscoveryFiles {
 
 const DNX_TIMEOUT_MS = 300_000;
 const PINNED_VERSION = /^\d+\.\d+\.\d+$/;
+
+async function getExtenderIds(upgradeRoot: string): Promise<readonly string[]> {
+  const entries = await readdir(upgradeRoot, { withFileTypes: true });
+  const ids = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .map(async (entry) => {
+        const manifestPath = join(
+          upgradeRoot,
+          entry.name,
+          "upgrade-extension.json",
+        );
+        try {
+          await access(manifestPath);
+          return entry.name;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT")
+            return undefined;
+          throw error;
+        }
+      }),
+  );
+  return ids.filter((id): id is string => id !== undefined).sort();
+}
+
 function getVersionPin(
   manifest: Record<string, unknown>,
   name: string,
@@ -179,14 +204,11 @@ export async function writeHostDiscoveryFiles(
   manifest: McpVersionManifest,
 ): Promise<HostDiscoveryFiles> {
   await mkdir(hostDir, { recursive: true });
-  const extendersRoot = join(pluginRoot, "extenders");
-  const extenderIds = (await readdir(extendersRoot, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
+  const upgradeRoot = join(pluginRoot, "upgrade");
+  const extenderIds = await getExtenderIds(upgradeRoot);
   const extenders = await Promise.all(
     extenderIds.map(async (id) => {
-      const sourcePath = join(extendersRoot, id, "upgrade-extension.json");
+      const sourcePath = join(upgradeRoot, id, "upgrade-extension.json");
       const manifestPath = join(
         hostDir,
         "extenders",
@@ -206,7 +228,7 @@ export async function writeHostDiscoveryFiles(
       );
       return {
         manifestPath,
-        skillsRoot: join(extendersRoot, id, "upgrade", "skills"),
+        skillsRoot: join(upgradeRoot, id, "skills"),
       };
     }),
   );

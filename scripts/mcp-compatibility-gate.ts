@@ -359,7 +359,7 @@ async function runCompatibilityGate(): Promise<void> {
         { kind: "skill", query: "migrating-csharp-nullable-references" },
       ],
       resources: [
-        "extenders/upgrade-dotnet/upgrade/skills/lazy/common/migrating-csharp-nullable-references/scripts/Get-NullableReadiness.ps1",
+        "upgrade/dotnet/skills/lazy/common/migrating-csharp-nullable-references/scripts/Get-NullableReadiness.ps1",
       ],
       scenario: "dotnet-version-upgrade",
     });
@@ -378,8 +378,8 @@ async function runCompatibilityGate(): Promise<void> {
         { kind: "skill", query: "typescript-dependencies-upgrade" },
       ],
       resources: [
-        "extenders/upgrade-typescript/upgrade/skills/typescript-compiler-upgrade/compiler-upgrade.md",
-        "extenders/upgrade-typescript/upgrade/skills/typescript-dependencies-upgrade/upgrade-packages.md",
+        "upgrade/typescript/skills/typescript-compiler-upgrade/compiler-upgrade.md",
+        "upgrade/typescript/skills/typescript-dependencies-upgrade/upgrade-packages.md",
       ],
     });
     const diagnostics = {

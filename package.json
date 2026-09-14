@@ -16,8 +16,7 @@
   "files": [
     "src",
     "plugins/upgrade-agent/agents",
-    "plugins/upgrade-agent/extenders",
-    "plugins/upgrade-agent/upgrade/skills",
+    "plugins/upgrade-agent/upgrade",
     "README.md",
     "LICENSE.md"
   ],

@@ -39,7 +39,10 @@ test("registerConvertedAgents_BundledAgents_Expect_PreservedOpenCodeConfiguratio
   );
 
   // Assert
-  assert.equal(Object.keys(config.agent ?? {}).length, 17);
+  assert.equal(
+    Object.keys(config.agent ?? {}).length,
+    converted.agents.length + 1,
+  );
   assert.deepEqual(
     Object.keys(config.agent ?? {})
       .filter((name) => name !== "Existing")
@@ -82,6 +85,7 @@ test("registerConvertedAgents_BundledAgents_Expect_PreservedOpenCodeConfiguratio
   assert.equal(config.agent?.BuildValidator?.mode, "subagent");
   assert.equal(config.agent?.BuildValidator?.hidden, true);
   assert.equal(config.agent?.BuildValidator?.model, "provider/small");
+  assert.equal(config.agent?.ReportGenerator?.mode, "subagent");
   for (const agent of converted.agents.filter(
     ({ name }) => name !== "Upgrade",
   )) {
