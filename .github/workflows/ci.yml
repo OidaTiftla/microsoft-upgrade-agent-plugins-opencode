@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_NOLOGO: "true"
+
+jobs:
+  validate:
+    name: Validate (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.21.0
+          cache: npm
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.x
+      - run: npm ci
+      - run: >-
+          node -e "const { execFileSync } = require('node:child_process'); const version = require('./package.json').dependencies['@opencode-ai/plugin']; const args = ['install', '--global', 'opencode-ai@' + version]; const windows = process.platform === 'win32'; execFileSync(windows ? process.env.ComSpec || 'cmd.exe' : 'npm', windows ? ['/d', '/s', '/c', 'npm.cmd', ...args] : args, { stdio: 'inherit' })"
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm run test:plugin
+      - run: npm run test:integration
+      - run: npm run test:opencode
+      - run: npm run test:package
+
+  platform-smoke:
+    name: OpenCode smoke (${{ matrix.os }})
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.21.0
+          cache: npm
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.x
+      - run: npm ci
+      - run: >-
+          node -e "const { execFileSync } = require('node:child_process'); const version = require('./package.json').dependencies['@opencode-ai/plugin']; const args = ['install', '--global', 'opencode-ai@' + version]; const windows = process.platform === 'win32'; execFileSync(windows ? process.env.ComSpec || 'cmd.exe' : 'npm', windows ? ['/d', '/s', '/c', 'npm.cmd', ...args] : args, { stdio: 'inherit' })"
+      - run: npm run test:opencode
+
+  publish:
+    name: Publish npm package
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [validate, platform-smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.21.0
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm ci
+      - name: Verify tag matches package version
+        env:
+          TAG_VERSION: ${{ github.ref_name }}
+        run: test "${TAG_VERSION#v}" = "$(node -p "require('./package.json').version")"
+      - run: npm publish
