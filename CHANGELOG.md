@@ -2,6 +2,18 @@
 
 All notable changes to the OpenCode Microsoft Upgrade Agent adapter are documented in this file. Upstream Microsoft Upgrade Agent workflow, skill, and extender changes are not tracked here.
 
+## [0.2.1] - 2026-09-14
+
+### Fixed
+
+- Restored extension discovery, MCP resources, and package inventory for the
+  current upstream Upgrade Agent asset layout.
+
+### Changed
+
+- Merged the latest upstream Microsoft Upgrade Agent updates, including
+  refreshed bundled workflows and skills.
+
 ## [0.2.0] - 2026-09-13
 
 ### Added

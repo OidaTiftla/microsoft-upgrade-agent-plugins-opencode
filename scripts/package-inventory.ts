@@ -3,7 +3,7 @@ import { join, relative, sep } from "node:path";
 
 const AGENTS_DIRECTORY = "plugins/upgrade-agent/agents";
 const UPGRADE_DIRECTORY = "plugins/upgrade-agent/upgrade";
-const RUNTIME_DIRECTORIES = ["src", UPGRADE_DIRECTORY];
+const RUNTIME_SOURCE_EXTENSIONS = new Set([".ts", ".json", ".md"]);
 
 async function listFiles(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -28,12 +28,11 @@ export async function getRuntimeAssetPaths(
   const agentPaths = (
     await listFiles(join(packageRoot, AGENTS_DIRECTORY))
   ).filter((path) => path.endsWith(".agent.md"));
-  const runtimePaths = await Promise.all(
-    RUNTIME_DIRECTORIES.map((directory) =>
-      listFiles(join(packageRoot, directory)),
-    ),
+  const sourcePaths = (await listFiles(join(packageRoot, "src"))).filter(
+    (path) => RUNTIME_SOURCE_EXTENSIONS.has(path.slice(path.lastIndexOf("."))),
   );
-  return [...new Set([...agentPaths, ...runtimePaths.flat()])]
+  const upgradePaths = await listFiles(join(packageRoot, UPGRADE_DIRECTORY));
+  return [...new Set([...agentPaths, ...sourcePaths, ...upgradePaths])]
     .map((path) => toPackagePath(packageRoot, path))
     .sort();
 }

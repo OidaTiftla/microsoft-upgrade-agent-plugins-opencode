@@ -26,6 +26,7 @@ test("getRuntimeAssetPaths_RuntimeSources_Expect_AllRequiredAssets", async () =>
   try {
     for (const path of [
       "src/index.ts",
+      "src/mcp-versions/obj/generated.cs",
       "plugins/upgrade-agent/agents/upgrade.agent.md",
       "plugins/upgrade-agent/upgrade/skills/system/post-scenario-completion/SKILL.md",
       "plugins/upgrade-agent/upgrade/example/upgrade-extension.json",

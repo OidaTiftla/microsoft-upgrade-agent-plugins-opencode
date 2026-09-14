@@ -1,6 +1,6 @@
 {
   "name": "opencode-microsoft-upgrade-agent",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "OpenCode adapter for the Microsoft Upgrade Agent workflows.",
   "repository": {
     "type": "git",
@@ -14,7 +14,9 @@
     "./server": "./src/index.ts"
   },
   "files": [
-    "src",
+    "src/*.ts",
+    "src/*.json",
+    "src/*.md",
     "plugins/upgrade-agent/agents",
     "plugins/upgrade-agent/upgrade",
     "README.md",
