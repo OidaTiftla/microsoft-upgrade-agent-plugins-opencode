@@ -25,7 +25,7 @@ jobs:
           cache: npm
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.x
+          dotnet-version: 10.0.401
       - run: npm ci
       - run: >-
           node -e "const { execFileSync } = require('node:child_process'); const version = require('./package.json').dependencies['@opencode-ai/plugin']; const args = ['install', '--global', 'opencode-ai@' + version]; const windows = process.platform === 'win32'; execFileSync(windows ? process.env.ComSpec || 'cmd.exe' : 'npm', windows ? ['/d', '/s', '/c', 'npm.cmd', ...args] : args, { stdio: 'inherit' })"
@@ -52,7 +52,7 @@ jobs:
           cache: npm
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.x
+          dotnet-version: 10.0.401
       - run: npm ci
       - run: >-
           node -e "const { execFileSync } = require('node:child_process'); const version = require('./package.json').dependencies['@opencode-ai/plugin']; const args = ['install', '--global', 'opencode-ai@' + version]; const windows = process.platform === 'win32'; execFileSync(windows ? process.env.ComSpec || 'cmd.exe' : 'npm', windows ? ['/d', '/s', '/c', 'npm.cmd', ...args] : args, { stdio: 'inherit' })"
