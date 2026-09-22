@@ -23,6 +23,13 @@
       ],
       "datasourceTemplate": "npm",
       "versioningTemplate": "npm"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^src\\/node-version\\.ts$/"],
+      "matchStrings": [
+        "// renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+) versioning=(?<versioning>[^\\s]+)\\s+export const NODE_VERSION = \\\"(?<currentValue>[^\\\"]+)\\\";"
+      ]
     }
   ],
   "packageRules": [
@@ -44,6 +51,22 @@
       "groupName": "Upgrade MCP compatibility stack",
       "automerge": false,
       "ignoreTests": false
+    },
+    {
+      "description": "Keep the Node.js runtime declarations synchronized.",
+      "matchPackageNames": ["node"],
+      "groupName": "Node.js runtime",
+      "automerge": true,
+      "platformAutomerge": true,
+      "automergeStrategy": "rebase",
+      "ignoreTests": false
+    },
+    {
+      "description": "Require approval for Node.js major upgrades.",
+      "matchPackageNames": ["node"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "platformAutomerge": false
     }
   ]
 }

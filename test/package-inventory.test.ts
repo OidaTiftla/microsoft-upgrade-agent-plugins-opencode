@@ -3,21 +3,40 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { parse } from "yaml";
 
 import {
   getRuntimeAssetPaths,
   validatePackageInventory,
 } from "../scripts/package-inventory.ts";
+import { NODE_VERSION } from "../src/node-version.ts";
 
-test("packageMetadata_RuntimeNodeVersion_Expect_NativeTypeScriptSupport", async () => {
+test("nodeVersionDeclarations_RuntimeRequirement_Expect_Synchronized", async () => {
   // Arrange
   const packagePath = new URL("../package.json", import.meta.url);
+  const workflowPath = new URL("../.github/workflows/ci.yml", import.meta.url);
 
   // Act
   const packageJson = JSON.parse(await readFile(packagePath, "utf8"));
+  const workflow = parse(await readFile(workflowPath, "utf8")) as {
+    env: { NODE_VERSION: string };
+    jobs: Record<
+      string,
+      {
+        steps: readonly { uses?: string; with?: { "node-version"?: string } }[];
+      }
+    >;
+  };
 
   // Assert
-  assert.equal(packageJson.engines.node, ">=22.18.0");
+  assert.equal(packageJson.engines.node, `>=${NODE_VERSION}`);
+  assert.equal(workflow.env.NODE_VERSION, NODE_VERSION);
+  for (const job of Object.values(workflow.jobs)) {
+    const setupNode = job.steps.find(
+      (step) => step.uses === "actions/setup-node@v6",
+    );
+    assert.equal(setupNode?.with?.["node-version"], "${{ env.NODE_VERSION }}");
+  }
 });
 
 test("getRuntimeAssetPaths_RuntimeSources_Expect_AllRequiredAssets", async () => {
