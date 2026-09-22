@@ -6,6 +6,7 @@ import {
   type McpPrerequisite,
   type PrerequisiteCommandRunner,
 } from "../src/mcp-prerequisites.ts";
+import { NODE_VERSION, NODE_VERSION_REQUIREMENT } from "../src/node-version.ts";
 
 const executableNames: readonly McpPrerequisite[] = [
   "dnx",
@@ -17,7 +18,7 @@ const executableNames: readonly McpPrerequisite[] = [
 function createRunner(
   availableExecutables: readonly McpPrerequisite[],
   dotnetVersion = "10.0.100",
-  nodeVersion = "v22.18.0",
+  nodeVersion = `v${NODE_VERSION}`,
 ): PrerequisiteCommandRunner {
   return {
     isExecutableAvailable: async (executable) =>
@@ -50,7 +51,7 @@ test("diagnoseMcpPrerequisites_MissingExecutable_Expect_ActionableDiagnostic", a
           remediation:
             executable === "dnx" || executable === "dotnet"
               ? "Install the .NET SDK 10 or later and ensure it is available on PATH."
-              : "Install Node.js 22.18.0 or later and ensure node and npx are available on PATH.",
+              : `Install Node.js ${NODE_VERSION_REQUIREMENT} and ensure node and npx are available on PATH.`,
         },
       ]);
     });
@@ -70,10 +71,8 @@ test("diagnoseMcpPrerequisites_OldNodeRuntime_Expect_ActionableDiagnostic", asyn
     {
       prerequisite: "node",
       status: "unsupported-version",
-      message:
-        "Detected Node.js v22.17.1, but version 22.18.0 or later is required.",
-      remediation:
-        "Install Node.js 22.18.0 or later and ensure node and npx are available on PATH.",
+      message: `Detected Node.js v22.17.1, but version ${NODE_VERSION_REQUIREMENT} is required.`,
+      remediation: `Install Node.js ${NODE_VERSION_REQUIREMENT} and ensure node and npx are available on PATH.`,
     },
   ]);
 });
@@ -92,8 +91,7 @@ test("diagnoseMcpPrerequisites_UnreadableNodeRuntime_Expect_ActionableDiagnostic
       prerequisite: "node",
       status: "unavailable",
       message: "Could not determine the installed Node.js version.",
-      remediation:
-        "Install Node.js 22.18.0 or later and ensure node --version succeeds.",
+      remediation: `Install Node.js ${NODE_VERSION_REQUIREMENT} and ensure node --version succeeds.`,
     },
   ]);
 });

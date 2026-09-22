@@ -1,5 +1,10 @@
 import { execFile } from "node:child_process";
 
+import {
+  NODE_MINIMUM_VERSION,
+  NODE_VERSION_REQUIREMENT,
+} from "./node-version.ts";
+
 export type McpPrerequisite = "dnx" | "dotnet" | "node" | "npx";
 
 export interface PrerequisiteCommandResult {
@@ -32,9 +37,7 @@ interface PrerequisiteDefinition {
   readonly remediation: string;
 }
 
-const NODE_MINIMUM_VERSION = [22, 18, 0] as const;
-const NODE_REMEDIATION =
-  "Install Node.js 22.18.0 or later and ensure node and npx are available on PATH.";
+const NODE_REMEDIATION = `Install Node.js ${NODE_VERSION_REQUIREMENT} and ensure node and npx are available on PATH.`;
 const DOTNET_REMEDIATION =
   "Install the .NET SDK 10 or later and ensure it is available on PATH.";
 
@@ -130,8 +133,7 @@ function createUnreadableNodeVersionDiagnostic(): McpPrerequisiteDiagnostic {
     prerequisite: "node",
     status: "unavailable",
     message: "Could not determine the installed Node.js version.",
-    remediation:
-      "Install Node.js 22.18.0 or later and ensure node --version succeeds.",
+    remediation: `Install Node.js ${NODE_VERSION_REQUIREMENT} and ensure node --version succeeds.`,
   };
 }
 
@@ -152,7 +154,7 @@ function createNodeVersionDiagnostic(
   return {
     prerequisite: "node",
     status: "unsupported-version",
-    message: `Detected Node.js ${normalizedVersion}, but version 22.18.0 or later is required.`,
+    message: `Detected Node.js ${normalizedVersion}, but version ${NODE_VERSION_REQUIREMENT} is required.`,
     remediation: NODE_REMEDIATION,
   };
 }

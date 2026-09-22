@@ -21,7 +21,7 @@ Install the npm package, then restart OpenCode so it reloads the plugin configur
 opencode plugin opencode-microsoft-upgrade-agent
 ```
 
-Shared prerequisites are the .NET SDK 10 or later (`dnx`), Node.js 22.18.0 or later, and npx. Node.js 22.18.0 is required because the buildless package launches its TypeScript proxy directly with Node.js native type stripping. The plugin sets `APPMOD_DISABLE_TELEMETRY=true`, `APPMOD_DISABLE_MCP_APPS=true`, and `DOTNET_CLI_TELEMETRY_OPTOUT=true` for the Core MCP process and its spawned extenders. These settings are opt-outs; they are not independent network-level telemetry verification. `DOTNET_NOLOGO=true` suppresses .NET CLI first-run banners.
+Shared prerequisites are the .NET SDK 10 or later (`dnx`), the Node.js version declared in [`package.json`](package.json) or later, and npx. That Node.js version is required because the buildless package launches its TypeScript proxy directly with Node.js native type stripping. The plugin sets `APPMOD_DISABLE_TELEMETRY=true`, `APPMOD_DISABLE_MCP_APPS=true`, and `DOTNET_CLI_TELEMETRY_OPTOUT=true` for the Core MCP process and its spawned extenders. These settings are opt-outs; they are not independent network-level telemetry verification. `DOTNET_NOLOGO=true` suppresses .NET CLI first-run banners.
 
 ## Platform support
 
