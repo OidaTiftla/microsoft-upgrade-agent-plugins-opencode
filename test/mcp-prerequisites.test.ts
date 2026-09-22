@@ -82,6 +82,17 @@ test("diagnoseMcpPrerequisites_OldNodeRuntime_Expect_ActionableDiagnostic", asyn
   ]);
 });
 
+test("diagnoseMcpPrerequisites_CurrentNodeMajor_Expect_ReadyResult", async () => {
+  // Arrange
+  const runner = createRunner(executableNames, DOTNET_VERSION, "v24.19.0");
+
+  // Act
+  const result = await diagnoseMcpPrerequisites(runner);
+
+  // Assert
+  assert.deepEqual(result, { isReady: true, diagnostics: [] });
+});
+
 test("diagnoseMcpPrerequisites_UnreadableNodeRuntime_Expect_ActionableDiagnostic", async () => {
   // Arrange
   const runner = createRunner(executableNames, DOTNET_VERSION, "unknown");

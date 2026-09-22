@@ -5,7 +5,7 @@ import {
   DOTNET_VERSION_REQUIREMENT,
 } from "./dotnet-version.ts";
 import {
-  NODE_MINIMUM_VERSION,
+  NODE_MINIMUM_MAJOR,
   NODE_VERSION_REQUIREMENT,
 } from "./node-version.ts";
 
@@ -142,16 +142,9 @@ function createNodeVersionDiagnostic(
   version: string,
 ): McpPrerequisiteDiagnostic | undefined {
   const normalizedVersion = version.trim();
-  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(normalizedVersion);
+  const match = /^v?(\d+)(?:\.\d+){0,2}(?:[-+].*)?$/.exec(normalizedVersion);
   if (match === null) return createUnreadableNodeVersionDiagnostic();
-  const installed = match.slice(1).map(Number);
-  const difference = installed.findIndex(
-    (part, index) => part !== NODE_MINIMUM_VERSION[index],
-  );
-  const isSupported =
-    difference === -1 ||
-    installed[difference]! > NODE_MINIMUM_VERSION[difference]!;
-  if (isSupported) return undefined;
+  if (Number(match[1]) >= NODE_MINIMUM_MAJOR) return undefined;
   return {
     prerequisite: "node",
     status: "unsupported-version",

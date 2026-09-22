@@ -10,7 +10,7 @@ import {
   validatePackageInventory,
 } from "../scripts/package-inventory.ts";
 import { DOTNET_VERSION } from "../src/dotnet-version.ts";
-import { NODE_VERSION } from "../src/node-version.ts";
+import { NODE_MINIMUM_MAJOR, NODE_VERSION } from "../src/node-version.ts";
 
 test("nodeVersionDeclarations_RuntimeRequirement_Expect_Synchronized", async () => {
   // Arrange
@@ -30,7 +30,7 @@ test("nodeVersionDeclarations_RuntimeRequirement_Expect_Synchronized", async () 
   };
 
   // Assert
-  assert.equal(packageJson.engines.node, `>=${NODE_VERSION}`);
+  assert.equal(packageJson.engines.node, `>=${NODE_MINIMUM_MAJOR}`);
   assert.equal(workflow.env.NODE_VERSION, NODE_VERSION);
   for (const job of Object.values(workflow.jobs)) {
     const setupNode = job.steps.find((step) =>
