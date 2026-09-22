@@ -9,6 +9,13 @@ git remote add upstream git@github.com:microsoft/upgrade-agent-plugins.git
 git fetch upstream
 git branch upstream-main upstream/main
 git push origin upstream-main -u
+git switch upstream-main
+git merge main
+git restore --ours -- CHANGELOG.md # restore CHANGELOG.md from upstream-main
+mv CHANGELOG.md CHANGELOG_UPSTREAM.md
+git restore --theirs -- CHANGELOG.md # restore CHANGELOG.md from main
+git add CHANGELOG.md CHANGELOG_UPSTREAM.md
+# resolve rest of the conflicts
 ```
 
 Then create a Pull-Request from `upstream-main`.
