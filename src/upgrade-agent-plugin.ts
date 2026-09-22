@@ -99,10 +99,20 @@ type Resources = {
   tools: readonly McpTool[];
 };
 
-function getPrerequisiteError(diagnostics: McpPrerequisiteDiagnostics): Error {
-  return new Error(
-    `MCP prerequisites are not satisfied:\n${diagnostics.diagnostics.map(({ prerequisite, message, remediation }) => `- ${prerequisite}: ${message} ${remediation}`).join("\n")}`,
+function getPrerequisiteMessage(
+  diagnostics: McpPrerequisiteDiagnostics,
+): string {
+  const failedPrerequisites = diagnostics.diagnostics
+    .map(({ prerequisite }) => prerequisite)
+    .join(", ");
+  const details = diagnostics.diagnostics.map(
+    ({ prerequisite, message, remediation }) =>
+      `- ${prerequisite}: ${message} ${remediation}`,
   );
+  return [
+    `Upgrade Agent cannot start because these prerequisites failed: ${failedPrerequisites}.`,
+    ...details,
+  ].join("\n");
 }
 
 function createDefaultPrivateClient(
@@ -182,8 +192,27 @@ export async function createUpgradeAgentPlugin(
   logPluginLoadState("checking prerequisites");
   const pluginOptions = getPluginOptions(options);
   const diagnostics = await dependencies.diagnose();
-  if (!diagnostics.isReady) throw getPrerequisiteError(diagnostics);
-  logPluginLoadState("prerequisites ready; converting bundled agents");
+  const prerequisiteMessage = diagnostics.isReady
+    ? undefined
+    : getPrerequisiteMessage(diagnostics);
+  if (prerequisiteMessage !== undefined) {
+    try {
+      await runtime.client.app.log({
+        body: {
+          level: "warn",
+          message: prerequisiteMessage,
+          service: "opencode-microsoft-upgrade-agent",
+        },
+      });
+    } catch (error) {
+      logPluginLoadFailure("prerequisite logging", error);
+    }
+  }
+  logPluginLoadState(
+    prerequisiteMessage === undefined
+      ? "prerequisites ready; converting bundled agents"
+      : "prerequisites unavailable; registering disabled controls",
+  );
   const conversion = await dependencies.convertAgents();
   logPluginLoadState("bundled agents converted; hooks ready");
   const registry = new UpgradeInvocationRegistry();
@@ -417,12 +446,32 @@ export async function createUpgradeAgentPlugin(
       }
     })());
   let warningsEmitted = false;
+  let prerequisiteWarningEmitted = false;
+  const notifyUnavailablePrerequisites = async (): Promise<void> => {
+    if (prerequisiteMessage === undefined || prerequisiteWarningEmitted) return;
+    prerequisiteWarningEmitted = true;
+    try {
+      await runtime.client.tui.showToast({
+        body: {
+          duration: 20_000,
+          message: prerequisiteMessage,
+          title: "Upgrade Agent unavailable",
+          variant: "error",
+        },
+      });
+    } catch (error) {
+      logPluginLoadFailure("prerequisite notification", error);
+    }
+  };
   const controls: NonNullable<Hooks["tool"]> = {
     enable_upgrade_mcp: tool({
       args: {},
       description: "Enable Upgrade MCP.",
       execute: async (_args, context) => ({
-        output: await enable(context),
+        output:
+          prerequisiteMessage === undefined
+            ? await enable(context)
+            : prerequisiteMessage,
         title: "Upgrade MCP",
       }),
     }),
@@ -486,6 +535,10 @@ export async function createUpgradeAgentPlugin(
     },
     "chat.params": sampling.applyChatParams,
     dispose,
+    event: async ({ event }) => {
+      if (event.type === "server.connected")
+        await notifyUnavailablePrerequisites();
+    },
     tool: controls,
     "tool.execute.before": async ({ tool: name, sessionID, callID }) => {
       if (name.startsWith(`${MCP_NAME}_`))
