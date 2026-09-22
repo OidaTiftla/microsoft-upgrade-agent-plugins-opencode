@@ -18,7 +18,7 @@ Then create a Pull-Request from `upstream-main`.
 Install the npm package, then restart OpenCode so it reloads the plugin configuration.
 
 ```bash
-opencode plugin opencode-microsoft-upgrade-agent
+opencode plugin opencode-microsoft-upgrade-agent@latest
 ```
 
 Shared prerequisites are the .NET SDK version declared in [`src/dotnet-version.ts`](src/dotnet-version.ts) or later (`dnx`), the Node.js version declared in [`package.json`](package.json) or later, and npx. That Node.js version is required because the buildless package launches its TypeScript proxy directly with Node.js native type stripping. The plugin sets `APPMOD_DISABLE_TELEMETRY=true`, `APPMOD_DISABLE_MCP_APPS=true`, and `DOTNET_CLI_TELEMETRY_OPTOUT=true` for the Core MCP process and its spawned extenders. These settings are opt-outs; they are not independent network-level telemetry verification. `DOTNET_NOLOGO=true` suppresses .NET CLI first-run banners.
