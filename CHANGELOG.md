@@ -2,6 +2,18 @@
 
 All notable changes to the OpenCode Microsoft Upgrade Agent adapter are documented in this file. Upstream Microsoft Upgrade Agent workflow, skill, and extender changes are not tracked here.
 
+## [0.2.2] - 2026-09-22
+
+### Fixed
+
+- Restored agent conversion for the latest upstream metadata and TypeScript Upgrade MCP tool namespace.
+
+### Changed
+
+- Updated bundled Microsoft Upgrade Agent workflows and skills to upstream 1.1.539.
+- Updated the TypeScript Upgrade MCP to 0.1.13 and the OpenCode plugin dependency to 1.18.31.
+- Raised the Node.js runtime requirement to 24 or later and centralized runtime version declarations for package validation and CI.
+
 ## [0.2.1] - 2026-09-14
 
 ### Fixed
