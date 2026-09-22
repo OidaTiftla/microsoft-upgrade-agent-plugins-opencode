@@ -14,7 +14,7 @@ env:
   DOTNET_NOLOGO: "true"
 
   # renovate: datasource=docker depName=node versioning=semver
-  NODE_VERSION: 22.23.2
+  NODE_VERSION: 24.21.0
 
 jobs:
   validate:
