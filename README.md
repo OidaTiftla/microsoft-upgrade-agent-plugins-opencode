@@ -1,62 +1,122 @@
-# GitHub Copilot upgrade
+# OpenCode Microsoft Upgrade Agent
 
-GitHub Copilot upgrade is an AI-powered agent that helps you upgrade applications to newer versions of languages, frameworks, and runtimes. It assesses your application, creates an upgrade plan, applies code changes, and validates the results through an interactive upgrade workflow.
+`opencode-microsoft-upgrade-agent` brings Microsoft Upgrade Agent workflows to OpenCode. It supports .NET and TypeScript/JavaScript upgrades through the Core `Upgrade` MCP and bundled extenders.
 
-## Get started
+## Pull Updates from Upstream
 
-GitHub Copilot upgrade is available from both the GitHub Copilot app and GitHub Copilot CLI.
-
-### GitHub Copilot app
-
-[**Add this marketplace in the GitHub Copilot app →**](https://github.com/copilot/app/launch?entry_point=upgrade_agent_plugins_readme&open=ghapp%3A%2F%2Fplugins%2Fmarketplace%2Fadd%3Fsource%3Dmicrosoft%2Fupgrade-agent-plugins)
-
-This opens the GitHub Copilot app to confirm your intention to add the marketplace: 
-
-<img width="411" height="252" alt="image" src="assets/Copilot-App-Allow-Add-Marketplace-Dark.png" />
-
-Once allowed, it will pre-populate the marketplace form: 
-
-<img width="670" height="336" alt="image" src="assets/Copilot-App-Add-Marketplace-Dark.png" />
-
-After adding the marketplace, installing the plugin is a single click from within the UI:
-
-<img width="650" height="131" alt="image" src="assets/Copilot-App-Install-Plugin-Dark.png" />
-
-_Note: Prior to v1.0.3 of the GitHub Copilot app, you will need to restart the app after installing the plugin before you can use the GitHub Copilot upgrade agent._
-
-Select the ```Upgrade``` agent from the Agent Picker:
-<img width="650" height="180" alt="image" src="assets/Copilot-App-Select-Agent-Dark.png" />
-
-Prompt the agent: 
-
-```
-upgrade my project to .NET 10
+```bash
+git remote add upstream git@github.com:microsoft/upgrade-agent-plugins.git
+git fetch upstream
+git branch upstream-main upstream/main
+git push origin upstream-main -u
 ```
 
-### GitHub Copilot CLI
+Then create a Pull-Request from `upstream-main`.
 
-Add the marketplace:
+## Install and restart OpenCode
 
-```javascript
-/plugin marketplace add microsoft/upgrade-agent-plugins
+Install the npm package, then restart OpenCode so it reloads the plugin configuration.
+
+```bash
+opencode plugin opencode-microsoft-upgrade-agent@latest
 ```
 
-Install the GitHub Copilot upgrade plugin:
-```javascript
-/plugin install upgrade-agent@upgrade-agent-plugins
+Shared prerequisites are the .NET SDK version declared in [`src/dotnet-version.ts`](src/dotnet-version.ts) or later (`dnx`), the Node.js version declared in [`package.json`](package.json) or later, and npx. That Node.js version is required because the buildless package launches its TypeScript proxy directly with Node.js native type stripping. The plugin sets `APPMOD_DISABLE_TELEMETRY=true`, `APPMOD_DISABLE_MCP_APPS=true`, and `DOTNET_CLI_TELEMETRY_OPTOUT=true` for the Core MCP process and its spawned extenders. These settings are opt-outs; they are not independent network-level telemetry verification. `DOTNET_NOLOGO=true` suppresses .NET CLI first-run banners.
+
+## Platform support
+
+Supported platforms and architectures:
+
+- Windows x64 and arm64
+- macOS x64 and arm64
+- Linux x64 and arm64
+
+This matches the six published optional packages of the pinned [`@microsoft/jsts-upgrade-assistant` TypeScript MCP](src/mcp-versions.json): `win32-x64`, `win32-arm64`, `darwin-x64`, `darwin-arm64`, `linux-x64`, and `linux-arm64`.
+
+The manual sampling gate differs by platform: macOS and Linux may copy existing local provider authentication into an isolated temporary home; Windows requires `OPENCODE_AUTH_CONTENT` because the test does not copy an authentication file where it cannot enforce a secure ACL.
+
+## Configure both model roles
+
+Set OpenCode's top-level `model` and `small_model` in `.opencode/opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "provider/main-model-id",
+  "small_model": "provider/fast-model-id",
+  "plugin": [["opencode-microsoft-upgrade-agent", { "sampling": "ask" }]]
+}
 ```
-Select the agent:
 
-```/agent``` to select  ```Upgrade ```
+- `model` — primary/main model for Upgrade orchestration, repository analysis, planning, and complex edits
+- `small_model` — faster, lower-cost model for MCP sampling and bundled lightweight worker agents
 
-Prompt the agent: 
+Choose a capable, long-context model with reliable tool calling for `model`. Choose an available, authenticated model that is faster and cheaper for `small_model`; use exact `provider/model-id` values and replace the example IDs with models enabled for your provider. If `small_model` is omitted or malformed, sampling falls back to the parent-session model; an unavailable configured model is not automatically replaced.
 
+## Sampling policy
+
+Set `sampling` in the plugin tuple shown above:
+
+- `ask` — default; approval occurs once per chat session when enabling, before any future Core sampling
+- `allow` — runs MCP sampling without approval
+- `deny` — rejects MCP sampling
+
+To require OpenCode to prompt before sampling, set the project-level permission in `.opencode/opencode.jsonc`:
+
+```jsonc
+{
+  "permission": {
+    "sampling": "ask",
+  },
+}
 ```
+
+Restart OpenCode after changing this setting. The plugin's `sampling` option controls the Core MCP policy; the OpenCode permission controls whether OpenCode asks for authorization.
+
+Approval is limited to the current chat session and occurs when `enable_upgrade_mcp` runs. OpenCode 1.18.23 renders the generic `Call tool sampling` prompt and hides MCP prompt previews, provider/model, token details, metadata, and patterns. See the [OpenCode permission renderer](https://github.com/anomalyco/opencode/blob/v1.18.23/packages/tui/src/routes/session/permission.tsx).
+
+Sampling prefers `small_model`, then the parent-session model. Exact MCP hints select a candidate only when it matches one of those configured models; model preferences with higher intelligence priority favor the main model. The Core client remains private inside the plugin. A thin local `Upgrade` proxy MCP is dynamically registered and connected only while enabled. Scenario and task skills remain MCP-provided paths, not native global OpenCode skills.
+
+OpenAI backends that reject `max_output_tokens` use the sampling instruction and post-response OpenCode token accounting validation instead of a provider-side cap.
+
+## Enable Upgrade when needed
+
+At startup, the plugin exposes only four native controls: `enable_upgrade_mcp`, `get_upgrade_mcp_status`, `list_upgrade_mcp_tools`, and `disable_upgrade_mcp`. It does not start or register Upgrade at startup. Have users or agents call `enable_upgrade_mcp`; after it succeeds, the `Upgrade_*` tools are immediately available in the same chat without a refresh. Use the status and list controls to inspect the connection and available tools, and `disable_upgrade_mcp` to disconnect them.
+
+## Select Upgrade and describe the work
+
+Select `Upgrade` in OpenCode's agent picker, then have it enable Upgrade and describe the work.
+
+```text
 upgrade my solution to .NET 10
 ```
 
-### Copilot Coding Agent
+The agent reports progress as text and gives full artifact paths. Canvas and dashboard features are unavailable.
 
-A custom agent definition and setup steps are provided for use with [Copilot Cloud Agent](https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-cloud-agent) in GitHub. This allows Copilot to upgrade projects directly via pull requests.
+Optional test-baseline generation needs an already registered `code-testing-generator` agent. OpenCode does not install Copilot plugins; choose the workflow's Skip path when that optional integration is unavailable.
 
-See the [cloud-agent README](cloud-agent/README.md) for setup instructions.
+Core binds an MCP process to the first repository path it receives. Restart OpenCode before switching repositories.
+
+## Limitations
+
+The compatibility gate runs the required TypeScript tools under the telemetry and MCP Apps opt-out, but cannot prove vendor transport suppression. Egress-sensitive environments should enforce their own network policy.
+
+## Validate a source checkout during development
+
+```bash
+npm run format
+npm run typecheck
+npm test # executes the following tests:
+# npm run test:plugin
+# npm run test:integration
+# npm run test:opencode
+# npm run test:package
+```
+
+## Manual credentialed sampling gate
+
+Excluded from `npm test` and the published npm package; run from a source checkout. It proves a sampled `Upgrade_start_task` through the production plugin after a canonical plan, with exact-once resume/start tool evidence. See the platform note above for authentication handling.
+
+```bash
+OPENCODE_UPGRADE_E2E_MODEL=provider/model npm run test:sampling-e2e
+```
