@@ -48,6 +48,9 @@ const KNOWN_PROPERTIES = new Set([
   "model",
   "tools",
   "mcp-servers",
+  "target",
+  "disable-model-invocation",
+  "agents",
 ]);
 const OPTIONAL_PROPERTIES = new Set(["metadata", "tags"]);
 const UPGRADE_TOOLS = new Set([
@@ -64,6 +67,13 @@ const UPGRADE_TOOLS = new Set([
   "predict_token_usage",
   "get_dotnet_upgrade_options",
   "generate_dotnet_upgrade_assessment",
+]);
+const JSTS_UPGRADE_TOOLS = new Set([
+  "typescript_compile_package",
+  "typescript_install_dependencies",
+  "typescript_prepare_browser_recording",
+  "typescript_report_dependabot_validation",
+  "typescript_validate_runtime",
 ]);
 const TOOL_PERMISSIONS: Readonly<Record<string, readonly string[]>> = {
   execute: ["bash"],
@@ -123,6 +133,43 @@ function getString(
   return value;
 }
 
+function getOptionalBoolean(
+  file: string,
+  frontmatter: Record<string, unknown>,
+  property: "user-invocable" | "disable-model-invocation",
+): boolean | undefined {
+  const value = frontmatter[property];
+  if (value !== undefined && typeof value !== "boolean") {
+    throw new AgentConversionError([
+      diagnostic(file, property, "A boolean is required."),
+    ]);
+  }
+  return value;
+}
+
+function validateTarget(file: string, target: unknown): void {
+  if (
+    target !== undefined &&
+    (typeof target !== "string" || target.trim() === "")
+  ) {
+    throw new AgentConversionError([
+      diagnostic(file, "target", "A non-empty string is required."),
+    ]);
+  }
+}
+
+function validateAgents(file: string, agents: unknown): void {
+  if (
+    agents !== undefined &&
+    (!Array.isArray(agents) ||
+      agents.some((agent) => typeof agent !== "string" || agent.trim() === ""))
+  ) {
+    throw new AgentConversionError([
+      diagnostic(file, "agents", "A non-empty string array is required."),
+    ]);
+  }
+}
+
 function mapTools(
   file: string,
   name: string,
@@ -161,6 +208,16 @@ function mapTools(
         ]);
       }
       if (mcpTool === "open_dashboard") continue;
+      permission[`Upgrade_${mcpTool}`] = "allow";
+      continue;
+    }
+    if (tool.startsWith("JSTSUpgradeAssistant/")) {
+      const mcpTool = tool.slice("JSTSUpgradeAssistant/".length);
+      if (!JSTS_UPGRADE_TOOLS.has(mcpTool)) {
+        throw new AgentConversionError([
+          diagnostic(file, "tools", `Unknown MCP tool ${tool}.`),
+        ]);
+      }
       permission[`Upgrade_${mcpTool}`] = "allow";
       continue;
     }
@@ -221,19 +278,21 @@ export function convertAgentSource(
   const warnings = getWarnings(file, frontmatter);
   const name = getString(file, frontmatter, "name");
   const description = getString(file, frontmatter, "description");
-  const userInvocable = frontmatter["user-invocable"];
-  if (userInvocable !== undefined && typeof userInvocable !== "boolean") {
-    throw new AgentConversionError([
-      diagnostic(file, "user-invocable", "A boolean is required."),
-    ]);
-  }
+  const userInvocable = getOptionalBoolean(file, frontmatter, "user-invocable");
+  const disableModelInvocation = getOptionalBoolean(
+    file,
+    frontmatter,
+    "disable-model-invocation",
+  );
+  validateTarget(file, frontmatter.target);
+  validateAgents(file, frontmatter.agents);
   const model = frontmatter.model;
   if (model !== undefined && typeof model !== "string") {
     throw new AgentConversionError([
       diagnostic(file, "model", "A string is required."),
     ]);
   }
-  const hidden = userInvocable === false;
+  const hidden = userInvocable === false || disableModelInvocation === true;
   return {
     agent: {
       id: basename(file).replace(/\.agent\.md$/, ""),
