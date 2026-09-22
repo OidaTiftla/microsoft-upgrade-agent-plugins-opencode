@@ -9,6 +9,7 @@ import {
   getRuntimeAssetPaths,
   validatePackageInventory,
 } from "../scripts/package-inventory.ts";
+import { DOTNET_VERSION } from "../src/dotnet-version.ts";
 import { NODE_VERSION } from "../src/node-version.ts";
 
 test("nodeVersionDeclarations_RuntimeRequirement_Expect_Synchronized", async () => {
@@ -36,6 +37,38 @@ test("nodeVersionDeclarations_RuntimeRequirement_Expect_Synchronized", async () 
       step.uses?.startsWith("actions/setup-node@"),
     );
     assert.equal(setupNode?.with?.["node-version"], "${{ env.NODE_VERSION }}");
+  }
+});
+
+test("dotnetVersionDeclarations_RuntimeRequirement_Expect_Synchronized", async () => {
+  // Arrange
+  const workflowPath = new URL("../.github/workflows/ci.yml", import.meta.url);
+
+  // Act
+  const workflow = parse(await readFile(workflowPath, "utf8")) as {
+    env: { DOTNET_VERSION: string };
+    jobs: Record<
+      string,
+      {
+        steps: readonly {
+          uses?: string;
+          with?: { "dotnet-version"?: string };
+        }[];
+      }
+    >;
+  };
+  const setupDotnetSteps = Object.values(workflow.jobs).flatMap(({ steps }) =>
+    steps.filter((step) => step.uses?.startsWith("actions/setup-dotnet@")),
+  );
+
+  // Assert
+  assert.equal(workflow.env.DOTNET_VERSION, DOTNET_VERSION);
+  assert.equal(setupDotnetSteps.length, 2);
+  for (const setupDotnet of setupDotnetSteps) {
+    assert.equal(
+      setupDotnet.with?.["dotnet-version"],
+      "${{ env.DOTNET_VERSION }}",
+    );
   }
 });
 

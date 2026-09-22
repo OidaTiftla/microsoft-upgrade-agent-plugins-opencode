@@ -1,6 +1,10 @@
 import { execFile } from "node:child_process";
 
 import {
+  DOTNET_MINIMUM_MAJOR,
+  DOTNET_VERSION_REQUIREMENT,
+} from "./dotnet-version.ts";
+import {
   NODE_MINIMUM_VERSION,
   NODE_VERSION_REQUIREMENT,
 } from "./node-version.ts";
@@ -38,8 +42,7 @@ interface PrerequisiteDefinition {
 }
 
 const NODE_REMEDIATION = `Install Node.js ${NODE_VERSION_REQUIREMENT} and ensure node and npx are available on PATH.`;
-const DOTNET_REMEDIATION =
-  "Install the .NET SDK 10 or later and ensure it is available on PATH.";
+const DOTNET_REMEDIATION = `Install the .NET SDK ${DOTNET_VERSION_REQUIREMENT} and ensure it is available on PATH.`;
 
 const prerequisiteDefinitions: readonly PrerequisiteDefinition[] = [
   {
@@ -100,8 +103,7 @@ function createUnreadableDotnetVersionDiagnostic(): McpPrerequisiteDiagnostic {
     prerequisite: "dotnet",
     status: "unavailable",
     message: "Could not determine the installed .NET SDK version.",
-    remediation:
-      "Install the .NET SDK 10 or later and ensure dotnet --version succeeds.",
+    remediation: `Install the .NET SDK ${DOTNET_VERSION_REQUIREMENT} and ensure dotnet --version succeeds.`,
   };
 }
 
@@ -115,16 +117,15 @@ function createDotnetVersionDiagnostic(
     return createUnreadableDotnetVersionDiagnostic();
   }
 
-  if (majorVersion >= 10) {
+  if (majorVersion >= DOTNET_MINIMUM_MAJOR) {
     return undefined;
   }
 
   return {
     prerequisite: "dotnet",
     status: "unsupported-version",
-    message: `Detected .NET SDK ${normalizedVersion}, but version 10 or later is required.`,
-    remediation:
-      "Install the .NET SDK 10 or later. Update global.json roll-forward settings if needed.",
+    message: `Detected .NET SDK ${normalizedVersion}, but version ${DOTNET_VERSION_REQUIREMENT} is required.`,
+    remediation: `Install the .NET SDK ${DOTNET_VERSION_REQUIREMENT}. Update global.json roll-forward settings if needed.`,
   };
 }
 

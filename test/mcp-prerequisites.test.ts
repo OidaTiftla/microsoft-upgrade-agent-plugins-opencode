@@ -6,6 +6,11 @@ import {
   type McpPrerequisite,
   type PrerequisiteCommandRunner,
 } from "../src/mcp-prerequisites.ts";
+import {
+  DOTNET_MINIMUM_MAJOR,
+  DOTNET_VERSION,
+  DOTNET_VERSION_REQUIREMENT,
+} from "../src/dotnet-version.ts";
 import { NODE_VERSION, NODE_VERSION_REQUIREMENT } from "../src/node-version.ts";
 
 const executableNames: readonly McpPrerequisite[] = [
@@ -17,7 +22,7 @@ const executableNames: readonly McpPrerequisite[] = [
 
 function createRunner(
   availableExecutables: readonly McpPrerequisite[],
-  dotnetVersion = "10.0.100",
+  dotnetVersion = DOTNET_VERSION,
   nodeVersion = `v${NODE_VERSION}`,
 ): PrerequisiteCommandRunner {
   return {
@@ -50,7 +55,7 @@ test("diagnoseMcpPrerequisites_MissingExecutable_Expect_ActionableDiagnostic", a
           message: `Required executable "${executable}" was not found on PATH.`,
           remediation:
             executable === "dnx" || executable === "dotnet"
-              ? "Install the .NET SDK 10 or later and ensure it is available on PATH."
+              ? `Install the .NET SDK ${DOTNET_VERSION_REQUIREMENT} and ensure it is available on PATH.`
               : `Install Node.js ${NODE_VERSION_REQUIREMENT} and ensure node and npx are available on PATH.`,
         },
       ]);
@@ -60,7 +65,7 @@ test("diagnoseMcpPrerequisites_MissingExecutable_Expect_ActionableDiagnostic", a
 
 test("diagnoseMcpPrerequisites_OldNodeRuntime_Expect_ActionableDiagnostic", async () => {
   // Arrange
-  const runner = createRunner(executableNames, "10.0.100", "v22.17.1");
+  const runner = createRunner(executableNames, DOTNET_VERSION, "v22.17.1");
 
   // Act
   const result = await diagnoseMcpPrerequisites(runner);
@@ -79,7 +84,7 @@ test("diagnoseMcpPrerequisites_OldNodeRuntime_Expect_ActionableDiagnostic", asyn
 
 test("diagnoseMcpPrerequisites_UnreadableNodeRuntime_Expect_ActionableDiagnostic", async () => {
   // Arrange
-  const runner = createRunner(executableNames, "10.0.100", "unknown");
+  const runner = createRunner(executableNames, DOTNET_VERSION, "unknown");
 
   // Act
   const result = await diagnoseMcpPrerequisites(runner);
@@ -98,7 +103,8 @@ test("diagnoseMcpPrerequisites_UnreadableNodeRuntime_Expect_ActionableDiagnostic
 
 test("diagnoseMcpPrerequisites_OldDotnetSdk_Expect_ActionableDiagnostic", async () => {
   // Arrange
-  const runner = createRunner(executableNames, "9.0.100");
+  const oldDotnetVersion = `${DOTNET_MINIMUM_MAJOR - 1}.0.100`;
+  const runner = createRunner(executableNames, oldDotnetVersion);
 
   // Act
   const result = await diagnoseMcpPrerequisites(runner);
@@ -109,10 +115,8 @@ test("diagnoseMcpPrerequisites_OldDotnetSdk_Expect_ActionableDiagnostic", async 
     {
       prerequisite: "dotnet",
       status: "unsupported-version",
-      message:
-        "Detected .NET SDK 9.0.100, but version 10 or later is required.",
-      remediation:
-        "Install the .NET SDK 10 or later. Update global.json roll-forward settings if needed.",
+      message: `Detected .NET SDK ${oldDotnetVersion}, but version ${DOTNET_VERSION_REQUIREMENT} is required.`,
+      remediation: `Install the .NET SDK ${DOTNET_VERSION_REQUIREMENT}. Update global.json roll-forward settings if needed.`,
     },
   ]);
 });

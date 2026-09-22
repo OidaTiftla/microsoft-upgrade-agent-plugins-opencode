@@ -13,6 +13,9 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: "true"
   DOTNET_NOLOGO: "true"
 
+  # renovate: datasource=docker depName=mcr.microsoft.com/dotnet/sdk versioning=docker
+  DOTNET_VERSION: 10.0.401
+
   # renovate: datasource=docker depName=node versioning=semver
   NODE_VERSION: 24.21.0
 
@@ -28,7 +31,7 @@ jobs:
           cache: npm
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.401
+          dotnet-version: ${{ env.DOTNET_VERSION }}
       - run: npm ci
       - run: >-
           node -e "const { execFileSync } = require('node:child_process'); const version = require('./package.json').dependencies['@opencode-ai/plugin']; const args = ['install', '--global', 'opencode-ai@' + version]; const windows = process.platform === 'win32'; execFileSync(windows ? process.env.ComSpec || 'cmd.exe' : 'npm', windows ? ['/d', '/s', '/c', 'npm.cmd', ...args] : args, { stdio: 'inherit' })"
@@ -55,7 +58,7 @@ jobs:
           cache: npm
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.401
+          dotnet-version: ${{ env.DOTNET_VERSION }}
       - run: npm ci
       - run: >-
           node -e "const { execFileSync } = require('node:child_process'); const version = require('./package.json').dependencies['@opencode-ai/plugin']; const args = ['install', '--global', 'opencode-ai@' + version]; const windows = process.platform === 'win32'; execFileSync(windows ? process.env.ComSpec || 'cmd.exe' : 'npm', windows ? ['/d', '/s', '/c', 'npm.cmd', ...args] : args, { stdio: 'inherit' })"

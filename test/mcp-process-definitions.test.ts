@@ -6,21 +6,14 @@ import test from "node:test";
 
 import {
   createCoreMcpProcessDefinition,
+  type McpVersionManifest,
   parseMcpVersionManifest,
   writeHostDiscoveryFiles,
 } from "../src/mcp-process-definitions.ts";
 
-const versionManifest = {
-  core: { package: "Microsoft.GitHubCopilot.Upgrade.Mcp", version: "1.1.441" },
-  dotnet: {
-    package: "Microsoft.GitHubCopilot.Upgrade.DotNet.Mcp",
-    version: "1.1.441",
-  },
-  typescript: {
-    package: "@microsoft/jsts-upgrade-assistant",
-    version: "0.1.6",
-  },
-};
+const versionManifest = JSON.parse(
+  await readFile(new URL("../src/mcp-versions.json", import.meta.url), "utf8"),
+) as McpVersionManifest;
 
 async function writeExtenderManifest(
   pluginRoot: string,
@@ -73,7 +66,7 @@ test("createCoreMcpProcessDefinition_HostDiscovery_Expect_ConfiguredCore", () =>
     name: "Upgrade",
     command: "dnx",
     args: [
-      "Microsoft.GitHubCopilot.Upgrade.Mcp@1.1.441",
+      `${versionManifest.core!.package}@${versionManifest.core!.version}`,
       "--yes",
       "--ignore-failed-sources",
     ],
@@ -151,12 +144,12 @@ test("writeHostDiscoveryFiles_PinnedExtenders_Expect_DerivedManifests", async ()
     assert.equal(
       JSON.parse(await readFile(files.extenders[0].manifestPath, "utf8")).mcp
         .args[0],
-      "Microsoft.GitHubCopilot.Upgrade.DotNet.Mcp@1.1.441",
+      `${versionManifest.dotnet!.package}@${versionManifest.dotnet!.version}`,
     );
     assert.equal(
       JSON.parse(await readFile(files.extenders[1].manifestPath, "utf8")).mcp
         .args[1],
-      "@microsoft/jsts-upgrade-assistant@0.1.6",
+      `${versionManifest.typescript!.package}@${versionManifest.typescript!.version}`,
     );
   } finally {
     await rm(root, { recursive: true, force: true });

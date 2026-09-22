@@ -25,9 +25,9 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^src\\/node-version\\.ts$/"],
+      "managerFilePatterns": ["/^src\\/(?:node|dotnet)-version\\.ts$/"],
       "matchStrings": [
-        "// renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+) versioning=(?<versioning>[^\\s]+)\\s+export const NODE_VERSION = \\\"(?<currentValue>[^\\\"]+)\\\";"
+        "// renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+) versioning=(?<versioning>[^\\s]+)\\s+export const [A-Z_]+_VERSION = \\\"(?<currentValue>[^\\\"]+)\\\";"
       ]
     }
   ],
@@ -66,6 +66,12 @@
       "matchUpdateTypes": ["major"],
       "automerge": false,
       "platformAutomerge": false
+    },
+    {
+      "description": "Keep the .NET runtime declarations synchronized.",
+      "matchPackageNames": ["mcr.microsoft.com/dotnet/sdk"],
+      "groupName": ".NET runtime",
+      "ignoreTests": false
     }
   ]
 }

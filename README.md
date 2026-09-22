@@ -21,7 +21,7 @@ Install the npm package, then restart OpenCode so it reloads the plugin configur
 opencode plugin opencode-microsoft-upgrade-agent
 ```
 
-Shared prerequisites are the .NET SDK 10 or later (`dnx`), the Node.js version declared in [`package.json`](package.json) or later, and npx. That Node.js version is required because the buildless package launches its TypeScript proxy directly with Node.js native type stripping. The plugin sets `APPMOD_DISABLE_TELEMETRY=true`, `APPMOD_DISABLE_MCP_APPS=true`, and `DOTNET_CLI_TELEMETRY_OPTOUT=true` for the Core MCP process and its spawned extenders. These settings are opt-outs; they are not independent network-level telemetry verification. `DOTNET_NOLOGO=true` suppresses .NET CLI first-run banners.
+Shared prerequisites are the .NET SDK version declared in [`src/dotnet-version.ts`](src/dotnet-version.ts) or later (`dnx`), the Node.js version declared in [`package.json`](package.json) or later, and npx. That Node.js version is required because the buildless package launches its TypeScript proxy directly with Node.js native type stripping. The plugin sets `APPMOD_DISABLE_TELEMETRY=true`, `APPMOD_DISABLE_MCP_APPS=true`, and `DOTNET_CLI_TELEMETRY_OPTOUT=true` for the Core MCP process and its spawned extenders. These settings are opt-outs; they are not independent network-level telemetry verification. `DOTNET_NOLOGO=true` suppresses .NET CLI first-run banners.
 
 ## Platform support
 
@@ -31,7 +31,7 @@ Supported platforms and architectures:
 - macOS x64 and arm64
 - Linux x64 and arm64
 
-This matches the six published optional packages of the pinned `@microsoft/jsts-upgrade-assistant@0.1.6` TypeScript MCP: `win32-x64`, `win32-arm64`, `darwin-x64`, `darwin-arm64`, `linux-x64`, and `linux-arm64`.
+This matches the six published optional packages of the pinned [`@microsoft/jsts-upgrade-assistant` TypeScript MCP](src/mcp-versions.json): `win32-x64`, `win32-arm64`, `darwin-x64`, `darwin-arm64`, `linux-x64`, and `linux-arm64`.
 
 The manual sampling gate differs by platform: macOS and Linux may copy existing local provider authentication into an isolated temporary home; Windows requires `OPENCODE_AUTH_CONTENT` because the test does not copy an authentication file where it cannot enforce a secure ACL.
 
