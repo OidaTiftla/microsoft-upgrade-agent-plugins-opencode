@@ -32,8 +32,8 @@ test("nodeVersionDeclarations_RuntimeRequirement_Expect_Synchronized", async () 
   assert.equal(packageJson.engines.node, `>=${NODE_VERSION}`);
   assert.equal(workflow.env.NODE_VERSION, NODE_VERSION);
   for (const job of Object.values(workflow.jobs)) {
-    const setupNode = job.steps.find(
-      (step) => step.uses === "actions/setup-node@v6",
+    const setupNode = job.steps.find((step) =>
+      step.uses?.startsWith("actions/setup-node@"),
     );
     assert.equal(setupNode?.with?.["node-version"], "${{ env.NODE_VERSION }}");
   }
