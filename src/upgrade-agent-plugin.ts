@@ -153,6 +153,20 @@ function isConnected(status: unknown): boolean {
   );
 }
 
+function getMcpConnectionFailure(status: unknown): Error {
+  const error =
+    status !== null &&
+    typeof status === "object" &&
+    typeof (status as { error?: unknown }).error === "string"
+      ? (status as { error: string }).error
+      : undefined;
+  return new Error(
+    error === undefined
+      ? "Upgrade MCP did not connect."
+      : `Upgrade MCP did not connect: ${error}`,
+  );
+}
+
 function getMcpStatus(response: unknown): unknown {
   return (response as { data?: Record<string, unknown> }).data?.[MCP_NAME];
 }
@@ -404,11 +418,10 @@ export async function createUpgradeAgentPlugin(
           );
           const status = getMcpStatus(result);
           if (status !== undefined) added = true;
-          if (!isConnected(status))
-            throw new Error("Upgrade MCP did not connect.");
+          if (!isConnected(status)) throw getMcpConnectionFailure(status);
         }
-        if (!isConnected(await getStatus(signal)))
-          throw new Error("Upgrade MCP did not connect.");
+        const status = await getStatus(signal);
+        if (!isConnected(status)) throw getMcpConnectionFailure(status);
         connected = true;
         return "Upgrade MCP connected.";
       } catch (error) {

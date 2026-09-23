@@ -501,6 +501,29 @@ test("createUpgradeAgentPlugin_ConnectionVerificationFailure_Expect_CleansDynami
   );
 });
 
+test("createUpgradeAgentPlugin_McpAddFailure_Expect_SurfacesMcpError", async () => {
+  // Arrange
+  const fixture = setup("allow");
+  fixture.runtime.client.mcp.add = (async () => ({
+    data: { Upgrade: { error: "spawn node ENOENT", status: "failed" } },
+  })) as unknown as typeof fixture.runtime.client.mcp.add;
+  const plugin = await createUpgradeAgentPlugin(
+    fixture.runtime,
+    { sampling: "allow" },
+    fixture.dependencies,
+  );
+  await plugin.config!({});
+
+  // Act
+  const action = () => plugin.tool!.enable_upgrade_mcp.execute({}, context());
+
+  // Assert
+  await assert.rejects(
+    action,
+    /Upgrade MCP did not connect: spawn node ENOENT/,
+  );
+});
+
 test("createUpgradeAgentPlugin_Dispose_Expect_CleansInitializedResources", async () => {
   // Arrange
   const fixture = setup("allow");
