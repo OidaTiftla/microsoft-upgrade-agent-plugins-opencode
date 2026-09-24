@@ -2,22 +2,16 @@ import { spawn } from "node:child_process";
 
 import {
   getRuntimeAssetPaths,
+  parseNpmPackFiles,
   validatePackageInventory,
 } from "./package-inventory.ts";
 
-interface NpmPackResult {
-  readonly files: readonly { readonly path: string }[];
-}
-
-function runNpmPack(): Promise<string> {
+async function runNpmPack(): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(
       "npm",
       ["pack", "--dry-run", "--json", "--ignore-scripts"],
-      {
-        cwd: process.cwd(),
-        stdio: ["ignore", "pipe", "pipe"],
-      },
+      { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] },
     );
     let stdout = "";
     let stderr = "";
@@ -36,13 +30,10 @@ function runNpmPack(): Promise<string> {
   });
 }
 
-const runtimeAssets = await getRuntimeAssetPaths(process.cwd());
 const output = await runNpmPack();
-const [pack] = JSON.parse(output) as NpmPackResult[];
-validatePackageInventory(
-  runtimeAssets,
-  pack.files.map(({ path }) => path),
-);
+const runtimeAssets = await getRuntimeAssetPaths(process.cwd());
+const packedFiles = parseNpmPackFiles(output);
+validatePackageInventory(runtimeAssets, packedFiles);
 process.stdout.write(
-  `${JSON.stringify({ runtimeAssets: runtimeAssets.length, packedFiles: pack.files.length })}\n`,
+  `${JSON.stringify({ runtimeAssets: runtimeAssets.length, packedFiles: packedFiles.length })}\n`,
 );

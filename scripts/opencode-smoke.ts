@@ -6,7 +6,14 @@ import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
 import { convertBundledAgents } from "../src/agent-converter.ts";
+import {
+  UpgradeInvocationRegistry,
+  UpgradeMcpProxyServer,
+} from "../src/upgrade-mcp-proxy-transport.ts";
 
 const SAMPLING_AGENT_NAME = "UpgradeSampler";
 const COMMAND_TIMEOUT_MS = 300_000;
@@ -113,6 +120,87 @@ function getSpawnSpec(
     command: environment.ComSpec ?? "cmd.exe",
     args: ["/d", "/s", "/c", `${command}.cmd`, ...args],
   };
+}
+
+async function verifyInstalledProxy(
+  pluginRoot: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<void> {
+  // Arrange
+  const registry = new UpgradeInvocationRegistry();
+  const invocation = {
+    callID: "smoke-call",
+    sessionID: "smoke-session",
+    tool: "Upgrade_get_state",
+  };
+  const calls: unknown[] = [];
+  registry.register(invocation);
+  const proxy = new UpgradeMcpProxyServer({
+    executeCoreTool: async (receivedInvocation, name, arguments_) => {
+      calls.push({ arguments_, name, receivedInvocation });
+      return { content: [{ text: "complete", type: "text" }] };
+    },
+    listToolDescriptors: async () => [
+      {
+        description: "Get state.",
+        inputSchema: { type: "object" },
+        name: "get_state",
+      },
+    ],
+    registry,
+    token: "smoke-token",
+  });
+  const client = new Client(
+    { name: "opencode-smoke-client", version: "1.0.0" },
+    { capabilities: {} },
+  );
+  let transport: StdioClientTransport | undefined;
+
+  try {
+    // Act
+    const endpoint = await proxy.start();
+    const proxyPath = join(pluginRoot, "src", "upgrade-mcp-proxy.ts");
+    const spawnSpec = getSpawnSpec("opencode", [proxyPath], environment);
+    transport = new StdioClientTransport({
+      args: [...spawnSpec.args],
+      command: spawnSpec.command,
+      env: {
+        ...environment,
+        BUN_BE_BUN: "1",
+        UPGRADE_MCP_PROXY_HOST: endpoint.host,
+        UPGRADE_MCP_PROXY_PORT: String(endpoint.port),
+        UPGRADE_MCP_PROXY_TOKEN: "smoke-token",
+      } as Record<string, string>,
+    });
+    await client.connect(transport);
+    const tools = await client.listTools();
+    const result = await client.callTool({
+      arguments: { path: "/repo" },
+      name: "get_state",
+    });
+
+    // Assert
+    assert.deepEqual(client.getServerCapabilities(), { tools: {} });
+    assert.deepEqual(tools.tools, [
+      {
+        description: "Get state.",
+        inputSchema: { type: "object" },
+        name: "get_state",
+      },
+    ]);
+    assert.deepEqual(result, { content: [{ text: "complete", type: "text" }] });
+    assert.deepEqual(calls, [
+      {
+        arguments_: { path: "/repo" },
+        name: "get_state",
+        receivedInvocation: invocation,
+      },
+    ]);
+  } finally {
+    await client.close().catch(() => undefined);
+    await transport?.close().catch(() => undefined);
+    await proxy.stop();
+  }
 }
 
 async function runCommand(
@@ -621,7 +709,9 @@ async function main(): Promise<void> {
     );
     const bundledPluginRoot = join(pluginRoot, "plugins", "upgrade-agent");
     const pluginEntry = join(pluginRoot, "src", "index.ts");
+    const proxyEntry = join(pluginRoot, "src", "upgrade-mcp-proxy.ts");
     await access(pluginEntry);
+    await access(proxyEntry);
     const pluginUrl = pathToFileURL(pluginEntry).href;
     const agents = await convertBundledAgents(
       join(bundledPluginRoot, "agents"),
@@ -668,6 +758,7 @@ async function main(): Promise<void> {
       OPENCODE_UPGRADE_AGENT_DIAGNOSTICS: "1",
       NPM_CONFIG_AUDIT: "false",
     };
+    await verifyInstalledProxy(pluginRoot, environment);
     const effectiveConfig = await getEffectiveConfig(environment);
     const mcpList = await expectCommand(
       "opencode",

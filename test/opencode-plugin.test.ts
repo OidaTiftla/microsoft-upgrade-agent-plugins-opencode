@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import type { Config, PluginInput, ToolContext } from "@opencode-ai/plugin";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -340,7 +341,11 @@ test("createUpgradeAgentPlugin_Enable_Expect_ApprovesAddsPrimesAndCorrelates", a
       };
     };
   };
-  assert.equal(add.add.body.config.command[0], "node");
+  assert.deepEqual(add.add.body.config.command, [
+    process.execPath,
+    fileURLToPath(new URL("../src/upgrade-mcp-proxy.ts", import.meta.url)),
+  ]);
+  assert.equal(add.add.body.config.environment.BUN_BE_BUN, "1");
   assert.equal(
     add.add.body.config.environment.UPGRADE_MCP_PROXY_HOST,
     "127.0.0.1",

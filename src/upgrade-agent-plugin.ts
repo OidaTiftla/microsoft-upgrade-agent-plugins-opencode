@@ -384,8 +384,10 @@ export async function createUpgradeAgentPlugin(
               body: {
                 name: MCP_NAME,
                 config: {
-                  command: ["node", PROXY_PATH],
+                  // OpenCode's executable runs the packaged TypeScript proxy as Bun.
+                  command: [process.execPath, PROXY_PATH],
                   environment: {
+                    BUN_BE_BUN: "1",
                     UPGRADE_MCP_PROXY_HOST: endpoint.host,
                     UPGRADE_MCP_PROXY_PORT: String(endpoint.port),
                     UPGRADE_MCP_PROXY_TOKEN: current.token,
