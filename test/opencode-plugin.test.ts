@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import type { Config, PluginInput, ToolContext } from "@opencode-ai/plugin";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -93,11 +94,19 @@ function setup(
 ) {
   const calls: unknown[] = [];
   const disposed = { value: false };
+  const logs: unknown[] = [];
   const mcpCalls: unknown[] = [];
+  const toasts: unknown[] = [];
   let status: string | undefined;
   let proxy: ProxyCapture | undefined;
   const runtime: UpgradeAgentPluginRuntime = {
     client: {
+      app: {
+        log: async (input: unknown) => {
+          logs.push(input);
+          return { data: true };
+        },
+      },
       mcp: {
         add: async (input: unknown) => {
           mcpCalls.push({ add: input });
@@ -119,6 +128,12 @@ function setup(
         }),
       },
       session: {},
+      tui: {
+        showToast: async (input: unknown) => {
+          toasts.push(input);
+          return { data: true };
+        },
+      },
     } as unknown as PluginInput["client"],
     directory: "/workspace",
   };
@@ -144,12 +159,14 @@ function setup(
     calls,
     dependencies,
     disposed,
+    logs,
     mcpCalls,
     proxy: () => proxy,
     runtime,
     setStatus: (value: string | undefined) => {
       status = value;
     },
+    toasts,
     policy,
   };
 }
@@ -181,7 +198,7 @@ test("getPluginOptions_MissingOrUnknown_Expect_DefaultOrError", () => {
   assert.throws(action, /Unknown Upgrade plugin option/);
 });
 
-test("createUpgradeAgentPlugin_MissingPrerequisites_Expect_NoInitialization", async () => {
+test("createUpgradeAgentPlugin_MissingPrerequisites_Expect_StartupAndNotification", async () => {
   // Arrange
   const fixture = setup();
   const dependencies: UpgradeAgentPluginDependencies = {
@@ -200,12 +217,44 @@ test("createUpgradeAgentPlugin_MissingPrerequisites_Expect_NoInitialization", as
   };
 
   // Act
-  const action = () =>
-    createUpgradeAgentPlugin(fixture.runtime, {}, dependencies);
+  const plugin = await createUpgradeAgentPlugin(
+    fixture.runtime,
+    {},
+    dependencies,
+  );
+  await plugin.config!({});
+  await plugin.event!({
+    event: { properties: {}, type: "server.connected" },
+  });
+  const enabled = await plugin.tool!.enable_upgrade_mcp.execute({}, context());
 
   // Assert
-  await assert.rejects(action, /dnx.*Install it/);
+  assert.equal(
+    output(enabled),
+    "Upgrade Agent cannot start because these prerequisites failed: dnx.\n- dnx: missing Install it.",
+  );
   assert.equal(fixture.proxy(), undefined);
+  assert.deepEqual(fixture.logs, [
+    {
+      body: {
+        level: "warn",
+        message:
+          "Upgrade Agent cannot start because these prerequisites failed: dnx.\n- dnx: missing Install it.",
+        service: "opencode-microsoft-upgrade-agent",
+      },
+    },
+  ]);
+  assert.deepEqual(fixture.toasts, [
+    {
+      body: {
+        duration: 20_000,
+        message:
+          "Upgrade Agent cannot start because these prerequisites failed: dnx.\n- dnx: missing Install it.",
+        title: "Upgrade Agent unavailable",
+        variant: "error",
+      },
+    },
+  ]);
 });
 
 test("createUpgradeAgentPlugin_Config_Expect_LazyFourControls", async () => {
@@ -292,7 +341,11 @@ test("createUpgradeAgentPlugin_Enable_Expect_ApprovesAddsPrimesAndCorrelates", a
       };
     };
   };
-  assert.equal(add.add.body.config.command[0], "node");
+  assert.deepEqual(add.add.body.config.command, [
+    process.execPath,
+    fileURLToPath(new URL("../src/upgrade-mcp-proxy.ts", import.meta.url)),
+  ]);
+  assert.equal(add.add.body.config.environment.BUN_BE_BUN, "1");
   assert.equal(
     add.add.body.config.environment.UPGRADE_MCP_PROXY_HOST,
     "127.0.0.1",

@@ -7,6 +7,7 @@ import { parse } from "yaml";
 
 import {
   getRuntimeAssetPaths,
+  parseNpmPackFiles,
   validatePackageInventory,
 } from "../scripts/package-inventory.ts";
 import { DOTNET_VERSION } from "../src/dotnet-version.ts";
@@ -104,6 +105,20 @@ test("getRuntimeAssetPaths_RuntimeSources_Expect_AllRequiredAssets", async () =>
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("parseNpmPackFiles_MalformedOrMissingFiles_Expect_ThrowsException", () => {
+  // Arrange
+  const malformedOutput = "not JSON";
+  const missingFilesOutput = JSON.stringify([{}]);
+
+  // Act
+  const malformed = () => parseNpmPackFiles(malformedOutput);
+  const missingFiles = () => parseNpmPackFiles(missingFilesOutput);
+
+  // Assert
+  assert.throws(malformed, /invalid JSON/);
+  assert.throws(missingFiles, /files array/);
 });
 
 test("validatePackageInventory_MissingRuntimeAsset_Expect_ThrowsException", () => {

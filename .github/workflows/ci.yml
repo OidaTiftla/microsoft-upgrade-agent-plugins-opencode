@@ -39,8 +39,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:plugin
       - run: npm run test:integration
-      - run: npm run test:opencode
       - run: npm run test:package
+      - run: npm run test:opencode
 
   platform-smoke:
     name: OpenCode smoke (${{ matrix.os }})
@@ -62,6 +62,7 @@ jobs:
       - run: npm ci
       - run: >-
           node -e "const { execFileSync } = require('node:child_process'); const version = require('./package.json').dependencies['@opencode-ai/plugin']; const args = ['install', '--global', 'opencode-ai@' + version]; const windows = process.platform === 'win32'; execFileSync(windows ? process.env.ComSpec || 'cmd.exe' : 'npm', windows ? ['/d', '/s', '/c', 'npm.cmd', ...args] : args, { stdio: 'inherit' })"
+      - run: npm run test:package
       - run: npm run test:opencode
 
   publish:
@@ -80,6 +81,7 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
       - run: npm ci
+      - run: npm run test:package
       - name: Verify tag matches package version
         env:
           TAG_VERSION: ${{ github.ref_name }}

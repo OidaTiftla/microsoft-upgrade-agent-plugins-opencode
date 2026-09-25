@@ -37,6 +37,29 @@ export async function getRuntimeAssetPaths(
     .sort();
 }
 
+export function parseNpmPackFiles(output: string): readonly string[] {
+  let value: unknown;
+  try {
+    value = JSON.parse(output);
+  } catch {
+    throw new Error("npm pack produced invalid JSON output.");
+  }
+  const pack = Array.isArray(value) ? value[0] : undefined;
+  if (pack === null || typeof pack !== "object" || !Array.isArray(pack.files))
+    throw new Error("npm pack JSON did not include a files array.");
+  const paths: string[] = [];
+  for (const file of pack.files as unknown[]) {
+    const path =
+      file !== null && typeof file === "object"
+        ? (file as { path?: unknown }).path
+        : undefined;
+    if (typeof path !== "string" || path.length === 0)
+      throw new Error("npm pack JSON included a file without a path.");
+    paths.push(path);
+  }
+  return paths;
+}
+
 export function validatePackageInventory(
   runtimeAssets: readonly string[],
   packedFiles: readonly string[],
