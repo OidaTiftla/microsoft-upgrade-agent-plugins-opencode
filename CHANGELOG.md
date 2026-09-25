@@ -2,6 +2,16 @@
 
 All notable changes to the OpenCode Microsoft Upgrade Agent adapter are documented in this file. Upstream Microsoft Upgrade Agent workflow, skill, and extender changes are not tracked here.
 
+## [0.2.3] - 2026-09-25
+
+### Fixed
+
+- Restored installed Upgrade MCP startup by running the packaged TypeScript proxy with OpenCode's embedded Bun runtime.
+
+### Changed
+
+- Added cross-platform installed-package coverage for proxy initialization, tool discovery, and tool forwarding.
+
 ## [0.2.2] - 2026-09-22
 
 ### Fixed
