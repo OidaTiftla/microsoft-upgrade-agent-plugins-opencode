@@ -5,14 +5,20 @@ import {
   parseNpmPackFiles,
   validatePackageInventory,
 } from "./package-inventory.ts";
+import { createNpmCommand } from "./npm-command.ts";
 
 async function runNpmPack(): Promise<string> {
+  const npmCommand = createNpmCommand([
+    "pack",
+    "--dry-run",
+    "--json",
+    "--ignore-scripts",
+  ]);
   return new Promise((resolve, reject) => {
-    const child = spawn(
-      "npm",
-      ["pack", "--dry-run", "--json", "--ignore-scripts"],
-      { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] },
-    );
+    const child = spawn(npmCommand.command, npmCommand.args, {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => {
