@@ -34,7 +34,7 @@
     "test:sampling-e2e": "node scripts/sampling-e2e.ts"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "1.18.32",
+    "@opencode-ai/plugin": "1.18.34",
     "@modelcontextprotocol/sdk": "1.30.1",
     "yaml": "2.9.1"
   },
