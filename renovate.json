@@ -61,6 +61,14 @@
       "ignoreTests": false
     },
     {
+      "description": "Keep the Node.js engine minimum at major-version granularity.",
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["engines"],
+      "matchPackageNames": ["node"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "enabled": false
+    },
+    {
       "description": "Require approval for Node.js major upgrades.",
       "matchPackageNames": ["node"],
       "matchUpdateTypes": ["major"],
