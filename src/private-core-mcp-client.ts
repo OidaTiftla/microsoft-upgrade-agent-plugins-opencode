@@ -16,12 +16,18 @@ import {
   writeHostDiscoveryFiles,
 } from "./mcp-process-definitions.ts";
 import type { CoreMcpToolRequestOptions } from "./core-mcp-runtime.ts";
+import {
+  forwardProcessStderr,
+  LoggedMcpTransport,
+  type DiagnosticLogger,
+} from "./plugin-logging.ts";
 
 export interface PrivateCoreMcpClientOptions {
   readonly pluginRoot: string;
   readonly signal?: AbortSignal;
   readonly versionManifestPath: URL | string;
   readonly sampling: SamplingCallback;
+  readonly log?: DiagnosticLogger;
 }
 
 export interface PrivateCoreMcpClient {
@@ -115,14 +121,28 @@ export async function createPrivateCoreMcpClient(
       CreateMessageRequestSchema,
       createSamplingHandler(options.sampling),
     );
+    const transport = new StdioClientTransport({
+      command: definition.command,
+      args: [...definition.args],
+      env: definition.env,
+      cwd: homedir(),
+      stderr: options.log === undefined ? "inherit" : "pipe",
+    });
+    if (options.log !== undefined && transport.stderr !== null)
+      forwardProcessStderr(
+        transport.stderr as import("node:stream").Readable,
+        "Upgrade Core",
+        options.log,
+      );
     await connectedClient.connect(
-      new StdioClientTransport({
-        command: definition.command,
-        args: [...definition.args],
-        env: definition.env,
-        cwd: homedir(),
-        stderr: "inherit",
-      }),
+      options.log === undefined
+        ? transport
+        : new LoggedMcpTransport(
+            transport,
+            "Upgrade Core",
+            "incoming",
+            options.log,
+          ),
       getMcpStartupRequestOptions(definition.timeout_ms, options.signal),
     );
     return {

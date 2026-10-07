@@ -106,6 +106,38 @@ upgrade my solution to .NET 10
 
 The agent reports progress as text and gives full artifact paths. Canvas and dashboard features are unavailable.
 
+By default, OpenCode logs lifecycle events, prerequisite names, status, remediation, fixed plugin error messages, and generic failure notices, but not raw process output or full exception details.
+
+<details>
+<summary>Enable sensitive diagnostics for one OpenCode session</summary>
+
+To include Core stderr, prerequisite command output, MCP protocol stdout, and exception details, quit OpenCode and start a new session with sensitive logging enabled only for that process.
+
+On Linux or macOS, run from a POSIX shell:
+
+```bash
+OPENCODE_UPGRADE_AGENT_LOG_SENSITIVE=1 opencode
+```
+
+On Windows, run from PowerShell 7:
+
+```powershell
+pwsh -NoProfile -Command '$env:OPENCODE_UPGRADE_AGENT_LOG_SENSITIVE = "1"; opencode'
+```
+
+Or run from Command Prompt:
+
+```bat
+cmd /C "set OPENCODE_UPGRADE_AGENT_LOG_SENSITIVE=1&& opencode"
+```
+
+These commands do not change the calling shell's environment; the setting ends when that OpenCode process exits.
+Detailed logs may contain repository content or credentials; review them before sharing.
+This setting controls only the plugin's log forwarding; OpenCode and external MCP processes may log independently.
+The public-repository `test:opencode` smoke test enables it only for its isolated OpenCode process; installed plugins keep the default.
+
+</details>
+
 Optional test-baseline generation needs an already registered `code-testing-generator` agent. OpenCode does not install Copilot plugins; choose the workflow's Skip path when that optional integration is unavailable.
 
 Core binds an MCP process to the first repository path it receives. Restart OpenCode before switching repositories.

@@ -5,6 +5,13 @@ import {
   type Server,
   type Socket,
 } from "node:net";
+import {
+  formatPluginError,
+  SAFE_PLUGIN_ERROR_MESSAGES,
+  SafePluginError,
+  type DiagnosticLogger,
+  type DiagnosticLevel,
+} from "./plugin-logging.ts";
 export interface UpgradeInvocation {
   readonly callID: string;
   readonly sessionID: string;
@@ -27,6 +34,7 @@ export interface UpgradeMcpProxyServerOptions {
   readonly listToolDescriptors: () => Promise<UpgradeMcpToolDescriptor[]>;
   readonly registry: UpgradeInvocationRegistry;
   readonly token: string;
+  readonly log?: DiagnosticLogger;
 }
 interface RequestBase {
   readonly token: string;
@@ -34,18 +42,24 @@ interface RequestBase {
 }
 type ContextRequest = RequestBase & { tool: string; type: "context" };
 type ToolsRequest = RequestBase & { type: "tools" };
+type DiagnosticRequest = RequestBase & {
+  level: DiagnosticLevel;
+  message: string;
+  type: "diagnostic";
+};
 interface CallRequest extends RequestBase {
   readonly arguments_: Record<string, unknown>;
   readonly invocation: UpgradeInvocation;
   readonly name: string;
   readonly type: "call";
 }
-type IpcRequest = CallRequest | ContextRequest | ToolsRequest;
+type IpcRequest =
+  CallRequest | ContextRequest | ToolsRequest | DiagnosticRequest;
 type IpcResponse = Record<string, unknown> & { type: string; version: 1 };
 const PROTOCOL_VERSION = 1,
   CONTROL_TIMEOUT_MS = 1_000;
 const CALL_TIMEOUT_MS = 3_600_000;
-const FAILURE = "Upgrade MCP proxy request unavailable.";
+const FAILURE = SAFE_PLUGIN_ERROR_MESSAGES.proxyRequestUnavailable;
 export const UPGRADE_MCP_PROXY_MAX_FRAME_BYTES = 1_048_576;
 export class UpgradeInvocationRegistry {
   #claimed = false;
@@ -53,17 +67,19 @@ export class UpgradeInvocationRegistry {
   acquire(tool: string): UpgradeInvocation {
     const invocation = this.#invocation;
     if (invocation === undefined || invocation.tool !== tool || this.#claimed)
-      throw new Error(FAILURE);
+      throw new SafePluginError("proxyRequestUnavailable");
     this.#claimed = true;
     return invocation;
   }
   match(invocation: UpgradeInvocation): UpgradeInvocation {
     const current = this.find(invocation);
-    if (current === undefined) throw new Error(FAILURE);
+    if (current === undefined)
+      throw new SafePluginError("proxyRequestUnavailable");
     return current;
   }
   register(invocation: UpgradeInvocation): void {
-    if (this.#invocation !== undefined) throw new Error(FAILURE);
+    if (this.#invocation !== undefined)
+      throw new SafePluginError("proxyRequestUnavailable");
     this.#invocation = { ...invocation };
   }
   release(invocation: UpgradeInvocation): void {
@@ -121,6 +137,21 @@ function parseRequest(frame: string): IpcRequest | undefined {
       };
     if (value.type === "tools")
       return { token: value.token, type: "tools", version: 1 };
+    if (
+      value.type === "diagnostic" &&
+      (value.level === "debug" ||
+        value.level === "error" ||
+        value.level === "info" ||
+        value.level === "warn") &&
+      typeof value.message === "string"
+    )
+      return {
+        level: value.level,
+        message: value.message,
+        token: value.token,
+        type: "diagnostic",
+        version: 1,
+      };
     if (
       value.type === "call" &&
       isInvocation(value.invocation) &&
@@ -198,6 +229,10 @@ export class UpgradeMcpProxyServer {
         return response("tools", {
           tools: await this.#options.listToolDescriptors(),
         });
+      if (request.type === "diagnostic") {
+        this.#options.log?.(request.level, request.message);
+        return response("logged", {});
+      }
       const invocation = this.#options.registry.match(request.invocation);
       try {
         if (request.invocation.tool !== `Upgrade_${request.name}`)
@@ -213,7 +248,11 @@ export class UpgradeMcpProxyServer {
       } finally {
         this.#options.registry.release(invocation);
       }
-    } catch {
+    } catch (error) {
+      this.#options.log?.(
+        "error",
+        `Upgrade proxy request failed: ${formatPluginError(error)}`,
+      );
       return FAILURE_RESPONSE;
     }
   }
@@ -262,7 +301,7 @@ export class UpgradeMcpProxyServer {
         const address = server.address();
         if (address === null || typeof address === "string") {
           server.close();
-          reject(new Error("Could not start the Upgrade MCP proxy listener."));
+          reject(new SafePluginError("proxyListenerUnavailable"));
           return;
         }
         this.#server = server;
@@ -307,7 +346,7 @@ function requestIpc<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   if (signal?.aborted)
-    return Promise.reject(new Error("Upgrade MCP proxy request cancelled."));
+    return Promise.reject(new SafePluginError("proxyRequestCancelled"));
   return new Promise((resolve, reject) => {
     const socket = createConnection(endpoint.port, endpoint.host);
     let responseText = "";
@@ -317,10 +356,9 @@ function requestIpc<T>(
       if (error === undefined) resolve(value!);
       else reject(error);
     };
-    const fail = (): void =>
-      settle(new Error("Upgrade MCP proxy request failed."));
+    const fail = (): void => settle(new SafePluginError("proxyRequestFailed"));
     const cancel = (): void =>
-      settle(new Error("Upgrade MCP proxy request cancelled."));
+      settle(new SafePluginError("proxyRequestCancelled"));
     const send = (): void => {
       try {
         socket.write(`${JSON.stringify(request)}\n`);
@@ -407,4 +445,23 @@ export function callUpgradeCoreTool(input: {
         : undefined,
     input.signal,
   );
+}
+
+export function reportUpgradeMcpDiagnostic(input: {
+  readonly endpoint: UpgradeMcpProxyEndpoint;
+  readonly level: DiagnosticLevel;
+  readonly message: string;
+  readonly token: string;
+}): Promise<void> {
+  return requestIpc(
+    input.endpoint,
+    {
+      level: input.level,
+      message: input.message,
+      token: input.token,
+      type: "diagnostic",
+      version: 1,
+    },
+    (response) => (response.type === "logged" ? true : undefined),
+  ).then(() => undefined);
 }

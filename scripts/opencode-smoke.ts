@@ -10,6 +10,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 import { convertBundledAgents } from "../src/agent-converter.ts";
+import { SENSITIVE_LOGGING_ENV } from "../src/plugin-logging.ts";
 import {
   UpgradeInvocationRegistry,
   UpgradeMcpProxyServer,
@@ -755,7 +756,7 @@ async function main(): Promise<void> {
       OPENCODE_DISABLE_AUTOCOMPACT: "1",
       OPENCODE_DISABLE_MODELS_FETCH: "1",
       OPENCODE_AUTH_CONTENT: "{}",
-      OPENCODE_UPGRADE_AGENT_DIAGNOSTICS: "1",
+      [SENSITIVE_LOGGING_ENV]: "1",
       NPM_CONFIG_AUDIT: "false",
     };
     await verifyInstalledProxy(pluginRoot, environment);

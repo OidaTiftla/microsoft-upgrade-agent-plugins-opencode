@@ -7,12 +7,49 @@ import {
   callUpgradeCoreTool,
   requestUpgradeInvocationContext,
   requestUpgradeMcpTools,
+  reportUpgradeMcpDiagnostic,
   type UpgradeInvocation,
 } from "../src/upgrade-mcp-proxy-transport.ts";
+import { withSensitiveLogging } from "./sensitive-logging.ts";
 
 function invocation(): UpgradeInvocation {
   return { callID: "call", sessionID: "session", tool: "Upgrade_get_state" };
 }
+
+test("reportUpgradeMcpDiagnostic_ValidToken_Expect_ForwardsToHostLogger", async () => {
+  // Arrange
+  const logs: unknown[] = [];
+  const server = new UpgradeMcpProxyServer({
+    executeCoreTool: async () => ({}),
+    listToolDescriptors: async () => [],
+    log: (level, message) => logs.push({ level, message }),
+    registry: new UpgradeInvocationRegistry(),
+    token: "test-token",
+  });
+  const endpoint = await server.start();
+
+  try {
+    // Act
+    await reportUpgradeMcpDiagnostic({
+      endpoint,
+      level: "error",
+      message: "proxy stack",
+      token: "test-token",
+    });
+    const invalid = reportUpgradeMcpDiagnostic({
+      endpoint,
+      level: "error",
+      message: "ignored",
+      token: "invalid",
+    });
+
+    // Assert
+    await assert.rejects(invalid, /request failed/);
+    assert.deepEqual(logs, [{ level: "error", message: "proxy stack" }]);
+  } finally {
+    await server.stop();
+  }
+});
 
 test("UpgradeInvocationRegistry_ConcurrentSameTool_Expect_RejectsSecondAndPreservesFirst", () => {
   // Arrange
@@ -92,6 +129,68 @@ test("UpgradeMcpProxyServer_ValidRequests_Expect_ReturnsContextToolsAndCoreResul
   } finally {
     await server.stop();
   }
+});
+
+test("UpgradeMcpProxyServer_MixedFailures_Expect_LogsOnlyKnownDetailsByDefault", async () => {
+  await withSensitiveLogging(false, async () => {
+    // Arrange
+    const registry = new UpgradeInvocationRegistry();
+    const current = invocation();
+    registry.register(current);
+    const logs: string[] = [];
+    const server = new UpgradeMcpProxyServer({
+      executeCoreTool: async () => {
+        throw new Error("private core response");
+      },
+      listToolDescriptors: async () => {
+        throw new Error("private tool list");
+      },
+      log: (_level, message) => logs.push(message),
+      registry,
+      token: "test-token",
+    });
+    const endpoint = await server.start();
+
+    try {
+      // Act
+      await assert.rejects(
+        () => requestUpgradeMcpTools({ endpoint, token: "test-token" }),
+        /request failed/,
+      );
+      await assert.rejects(
+        () =>
+          callUpgradeCoreTool({
+            arguments_: {},
+            endpoint,
+            invocation: { ...current, callID: "other" },
+            name: "get_state",
+            token: "test-token",
+          }),
+        /request failed/,
+      );
+      await assert.rejects(
+        () =>
+          callUpgradeCoreTool({
+            arguments_: {},
+            endpoint,
+            invocation: current,
+            name: "get_state",
+            token: "test-token",
+          }),
+        /request failed/,
+      );
+
+      // Assert
+      assert.deepEqual(logs, [
+        "Upgrade proxy request failed: details withheld (set OPENCODE_UPGRADE_AGENT_LOG_SENSITIVE=1 to log details)",
+        "Upgrade proxy request failed: Upgrade MCP proxy request unavailable.",
+        "Upgrade proxy request failed: details withheld (set OPENCODE_UPGRADE_AGENT_LOG_SENSITIVE=1 to log details)",
+      ]);
+      assert.ok(logs.every((message) => !message.includes("private")));
+    } finally {
+      await server.stop();
+    }
+  });
 });
 
 test("UpgradeMcpProxyServer_UnauthorizedOrMismatchedCall_Expect_FailsClosed", async () => {

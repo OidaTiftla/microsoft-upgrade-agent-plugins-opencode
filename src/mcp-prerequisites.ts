@@ -8,6 +8,12 @@ import {
   NODE_MINIMUM_MAJOR,
   NODE_VERSION_REQUIREMENT,
 } from "./node-version.ts";
+import {
+  formatPluginError,
+  isSensitiveLoggingEnabled,
+  SENSITIVE_LOGGING_ENV,
+  type DiagnosticLogger,
+} from "./plugin-logging.ts";
 
 export type McpPrerequisite = "dnx" | "dotnet" | "node" | "npx";
 
@@ -66,21 +72,42 @@ const prerequisiteDefinitions: readonly PrerequisiteDefinition[] = [
 function runCommand(
   command: string,
   arguments_: readonly string[],
+  log?: DiagnosticLogger,
 ): Promise<PrerequisiteCommandResult> {
   return new Promise((resolve) => {
-    execFile(command, arguments_, (error, stdout) => {
+    execFile(command, arguments_, (error, stdout, stderr) => {
+      if (stdout && isSensitiveLoggingEnabled())
+        log?.("debug", `${command} stdout: ${stdout}`, { sensitive: true });
+      if (stderr) {
+        if (isSensitiveLoggingEnabled())
+          log?.("error", `${command} stderr: ${stderr}`, { sensitive: true });
+        else
+          log?.(
+            "error",
+            `${command} stderr output suppressed; set ${SENSITIVE_LOGGING_ENV}=1 to log details.`,
+          );
+      }
+      if (error)
+        log?.("error", `${command} failed: ${formatPluginError(error)}`);
       resolve({ succeeded: error === null, stdout });
     });
   });
 }
 
-export const systemPrerequisiteCommandRunner: PrerequisiteCommandRunner = {
-  async isExecutableAvailable(executable) {
-    const command = process.platform === "win32" ? "where" : "which";
-    return (await runCommand(command, [executable])).succeeded;
-  },
-  run: runCommand,
-};
+export function createSystemPrerequisiteCommandRunner(
+  log?: DiagnosticLogger,
+): PrerequisiteCommandRunner {
+  return {
+    async isExecutableAvailable(executable) {
+      const command = process.platform === "win32" ? "where" : "which";
+      return (await runCommand(command, [executable], log)).succeeded;
+    },
+    run: (command, arguments_) => runCommand(command, arguments_, log),
+  };
+}
+
+export const systemPrerequisiteCommandRunner =
+  createSystemPrerequisiteCommandRunner();
 
 function createMissingDiagnostic(
   definition: PrerequisiteDefinition,

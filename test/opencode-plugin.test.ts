@@ -3,7 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import type { Config, PluginInput, ToolContext } from "@opencode-ai/plugin";
+import type {
+  Config,
+  PluginInput,
+  PluginOptions,
+  ToolContext,
+} from "@opencode-ai/plugin";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 import type { AgentConversionResult } from "../src/agent-converter.ts";
@@ -20,6 +25,8 @@ import type {
   ExecuteUpgradeCoreTool,
   UpgradeInvocationRegistry,
 } from "../src/upgrade-mcp-proxy-transport.ts";
+import { SENSITIVE_LOGGING_ENV } from "../src/plugin-logging.ts";
+import { withSensitiveLogging } from "./sensitive-logging.ts";
 
 const conversion: AgentConversionResult = {
   agents: [
@@ -153,7 +160,6 @@ function setup(
       };
     },
     diagnose: async () => ({ diagnostics: [], isReady: true }),
-    warn: () => undefined,
   };
   return {
     calls,
@@ -185,6 +191,101 @@ test("packageEntry_ExportsServerEntrypoint_Expect_DefaultPluginOnly", async () =
   assert.deepEqual(exports, ["default"]);
 });
 
+test("packageEntry_InvalidOptions_Expect_LogsInitializationError", async () => {
+  await withSensitiveLogging(false, async () => {
+    // Arrange
+    const fixture = setup();
+    const input = {
+      client: fixture.runtime.client,
+      directory: fixture.runtime.directory,
+    } as PluginInput;
+
+    // Act
+    const action = () => packageEntry.default(input, { invalid: true });
+
+    // Assert
+    await assert.rejects(action, /Unknown Upgrade plugin option/);
+    assert.ok(
+      fixture.logs.some((entry) =>
+        (entry as { body: { message: string } }).body.message.includes(
+          "Upgrade plugin initialization failed: details withheld",
+        ),
+      ),
+    );
+    assert.ok(
+      fixture.logs.every(
+        (entry) =>
+          !(entry as { body: { message: string } }).body.message.includes(
+            "Unknown Upgrade plugin option",
+          ),
+      ),
+    );
+  });
+});
+
+test("packageEntry_InvalidOptionsWithOptIn_Expect_LogsExceptionDetails", async () => {
+  await withSensitiveLogging(true, async () => {
+    // Arrange
+    const fixture = setup();
+    const input = {
+      client: fixture.runtime.client,
+      directory: fixture.runtime.directory,
+    } as PluginInput;
+
+    // Act
+    await assert.rejects(
+      () => packageEntry.default(input, { invalid: true }),
+      /Unknown Upgrade plugin option/,
+    );
+
+    // Assert
+    assert.ok(
+      fixture.logs.some((entry) =>
+        (entry as { body: { message: string } }).body.message.includes(
+          "Error: Unknown Upgrade plugin option",
+        ),
+      ),
+    );
+  });
+});
+
+test("packageEntry_KnownOptionFailures_Expect_SafeMessageInDefaultLogs", async (t) => {
+  for (const { options, message } of [
+    { options: null, message: "Upgrade plugin options must be an object." },
+    {
+      options: { sampling: "always" },
+      message:
+        'Upgrade plugin option "sampling" must be "ask", "allow", or "deny".',
+    },
+  ]) {
+    await t.test(message, async () => {
+      await withSensitiveLogging(false, async () => {
+        // Arrange
+        const fixture = setup();
+        const input = {
+          client: fixture.runtime.client,
+          directory: fixture.runtime.directory,
+        } as PluginInput;
+
+        // Act
+        await assert.rejects(
+          () => packageEntry.default(input, options as PluginOptions),
+          { message },
+        );
+
+        // Assert
+        assert.ok(
+          fixture.logs.some(
+            (entry) =>
+              (entry as { body: { message: string } }).body.message ===
+              `Upgrade plugin initialization failed: ${message}`,
+          ),
+        );
+      });
+    });
+  }
+});
+
 test("getPluginOptions_MissingOrUnknown_Expect_DefaultOrError", () => {
   // Arrange
   const options = { unsupported: true };
@@ -199,62 +300,169 @@ test("getPluginOptions_MissingOrUnknown_Expect_DefaultOrError", () => {
 });
 
 test("createUpgradeAgentPlugin_MissingPrerequisites_Expect_StartupAndNotification", async () => {
-  // Arrange
-  const fixture = setup();
-  const dependencies: UpgradeAgentPluginDependencies = {
-    ...fixture.dependencies,
-    diagnose: async () => ({
-      diagnostics: [
-        {
-          message: "missing",
-          prerequisite: "dnx",
-          remediation: "Install it.",
-          status: "missing",
-        },
+  await withSensitiveLogging(false, async () => {
+    // Arrange
+    const fixture = setup();
+    const dependencies: UpgradeAgentPluginDependencies = {
+      ...fixture.dependencies,
+      diagnose: async () => ({
+        diagnostics: [
+          {
+            message: "missing",
+            prerequisite: "dnx",
+            remediation: "Install it.",
+            status: "missing",
+          },
+        ],
+        isReady: false,
+      }),
+    };
+
+    // Act
+    const plugin = await createUpgradeAgentPlugin(
+      fixture.runtime,
+      {},
+      dependencies,
+    );
+    await plugin.config!({});
+    await plugin.event!({
+      event: { properties: {}, type: "server.connected" },
+    });
+    const enabled = await plugin.tool!.enable_upgrade_mcp.execute(
+      {},
+      context(),
+    );
+
+    // Assert
+    assert.equal(
+      output(enabled),
+      "Upgrade Agent cannot start because these prerequisites failed: dnx.\n- dnx: missing Install it.",
+    );
+    assert.equal(fixture.proxy(), undefined);
+    assert.deepEqual(
+      fixture.logs.map(
+        (entry) => (entry as { body: { message: string } }).body.message,
+      ),
+      [
+        "checking prerequisites",
+        "Upgrade Agent cannot start because these prerequisites failed: dnx.\n- dnx: missing Install it.",
+        "prerequisites unavailable; registering disabled controls",
+        "bundled agents converted; hooks ready",
+        "registering configuration",
+        "configuration registered",
       ],
-      isReady: false,
-    }),
-  };
-
-  // Act
-  const plugin = await createUpgradeAgentPlugin(
-    fixture.runtime,
-    {},
-    dependencies,
-  );
-  await plugin.config!({});
-  await plugin.event!({
-    event: { properties: {}, type: "server.connected" },
+    );
+    assert.equal(
+      (fixture.logs[1] as { body: { level: string } }).body.level,
+      "warn",
+    );
+    assert.deepEqual(fixture.toasts, [
+      {
+        body: {
+          duration: 20_000,
+          message:
+            "Upgrade Agent cannot start because these prerequisites failed: dnx.\n- dnx: missing Install it.",
+          title: "Upgrade Agent unavailable",
+          variant: "error",
+        },
+      },
+    ]);
   });
-  const enabled = await plugin.tool!.enable_upgrade_mcp.execute({}, context());
+});
 
-  // Assert
-  assert.equal(
-    output(enabled),
-    "Upgrade Agent cannot start because these prerequisites failed: dnx.\n- dnx: missing Install it.",
-  );
-  assert.equal(fixture.proxy(), undefined);
-  assert.deepEqual(fixture.logs, [
-    {
-      body: {
-        level: "warn",
-        message:
-          "Upgrade Agent cannot start because these prerequisites failed: dnx.\n- dnx: missing Install it.",
-        service: "opencode-microsoft-upgrade-agent",
+test("createUpgradeAgentPlugin_UnsupportedVersion_Expect_ActionableLogWithoutRawOutput", async (t) => {
+  for (const enabled of [false, true]) {
+    await t.test(
+      enabled ? "sensitive logging enabled" : "sensitive logging disabled",
+      async () => {
+        await withSensitiveLogging(enabled, async () => {
+          // Arrange
+          const fixture = setup();
+          const dependencies: UpgradeAgentPluginDependencies = {
+            ...fixture.dependencies,
+            diagnose: async () => ({
+              diagnostics: [
+                {
+                  prerequisite: "dotnet",
+                  status: "unsupported-version",
+                  message:
+                    "Detected .NET SDK 9.0.100 private-path, but version 10 or later is required.",
+                  remediation: "Install the .NET SDK 10 or later.",
+                },
+              ],
+              isReady: false,
+            }),
+          };
+
+          // Act
+          const plugin = await createUpgradeAgentPlugin(
+            fixture.runtime,
+            {},
+            dependencies,
+          );
+          const warning = fixture.logs.find(
+            (entry) =>
+              (entry as { body: { level: string } }).body.level === "warn",
+          ) as { body: { message: string } };
+
+          // Assert
+          assert.equal(
+            warning.body.message,
+            `Upgrade Agent cannot start because these prerequisites failed: dotnet.\n- dotnet: ${enabled ? "Detected .NET SDK 9.0.100 private-path, but version 10 or later is required." : "unsupported version"} Install the .NET SDK 10 or later.`,
+          );
+          assert.equal(
+            fixture.logs.filter(
+              (entry) =>
+                (entry as { body: { level: string } }).body.level === "warn",
+            ).length,
+            1,
+          );
+          await plugin.dispose!();
+        });
       },
-    },
-  ]);
-  assert.deepEqual(fixture.toasts, [
-    {
-      body: {
-        duration: 20_000,
-        message:
-          "Upgrade Agent cannot start because these prerequisites failed: dnx.\n- dnx: missing Install it.",
-        title: "Upgrade Agent unavailable",
-        variant: "error",
-      },
-    },
-  ]);
+    );
+  }
+});
+
+test("createUpgradeAgentPlugin_BundledConversionWarning_Expect_WarnWithoutSensitiveOptIn", async () => {
+  await withSensitiveLogging(false, async () => {
+    // Arrange
+    const fixture = setup();
+    const dependencies: UpgradeAgentPluginDependencies = {
+      ...fixture.dependencies,
+      convertAgents: async () => ({
+        ...conversion,
+        diagnostics: [
+          {
+            level: "warning",
+            file: "agents/worker.md",
+            property: "model",
+            message: "unrecognized hint",
+          },
+        ],
+      }),
+    };
+
+    // Act
+    const plugin = await createUpgradeAgentPlugin(
+      fixture.runtime,
+      {},
+      dependencies,
+    );
+    await plugin.config!({});
+
+    // Assert
+    assert.ok(
+      fixture.logs.some((entry) => {
+        const body = (entry as { body: { level: string; message: string } })
+          .body;
+        return (
+          body.level === "warn" &&
+          body.message.includes("agents/worker.md model: unrecognized hint")
+        );
+      }),
+    );
+  });
 });
 
 test("createUpgradeAgentPlugin_Config_Expect_LazyFourControls", async () => {
@@ -347,6 +555,10 @@ test("createUpgradeAgentPlugin_Enable_Expect_ApprovesAddsPrimesAndCorrelates", a
   ]);
   assert.equal(add.add.body.config.environment.BUN_BE_BUN, "1");
   assert.equal(
+    add.add.body.config.environment[SENSITIVE_LOGGING_ENV],
+    undefined,
+  );
+  assert.equal(
     add.add.body.config.environment.UPGRADE_MCP_PROXY_HOST,
     "127.0.0.1",
   );
@@ -355,6 +567,28 @@ test("createUpgradeAgentPlugin_Enable_Expect_ApprovesAddsPrimesAndCorrelates", a
     64,
   );
   assert.equal(add.add.body.config.timeout, 3_600_000);
+});
+
+test("createUpgradeAgentPlugin_EnableWithSensitiveLogging_Expect_PropagatesOptInToProxy", async () => {
+  await withSensitiveLogging(true, async () => {
+    // Arrange
+    const fixture = setup("allow");
+    const plugin = await createUpgradeAgentPlugin(
+      fixture.runtime,
+      { sampling: "allow" },
+      fixture.dependencies,
+    );
+    await plugin.config!({});
+
+    // Act
+    await plugin.tool!.enable_upgrade_mcp.execute({}, context());
+
+    // Assert
+    const add = fixture.mcpCalls.find((call) => "add" in (call as object)) as {
+      add: { body: { config: { environment: Record<string, string> } } };
+    };
+    assert.equal(add.add.body.config.environment[SENSITIVE_LOGGING_ENV], "1");
+  });
 });
 
 test("createUpgradeAgentPlugin_EnableSessionsAndDisable_Expect_CachesAskAndReconnects", async () => {
@@ -494,6 +728,20 @@ test("createUpgradeAgentPlugin_ConnectionVerificationFailure_Expect_CleansDynami
 
   // Assert
   await assert.rejects(action, /did not connect/);
+  assert.ok(
+    fixture.logs.some((entry) =>
+      (entry as { body: { message: string } }).body.message.includes(
+        "Upgrade MCP enable failed: Upgrade MCP did not connect.",
+      ),
+    ),
+  );
+  assert.ok(
+    fixture.logs.some((entry) =>
+      (entry as { body: { message: string } }).body.message.includes(
+        "Upgrade MCP disconnect cleanup failed: details withheld",
+      ),
+    ),
+  );
   assert.equal(fixture.proxy()!.stopped, 1);
   assert.equal(
     fixture.mcpCalls.filter((call) => "disconnect" in (call as object)).length,
@@ -521,6 +769,21 @@ test("createUpgradeAgentPlugin_McpAddFailure_Expect_SurfacesMcpError", async () 
   await assert.rejects(
     action,
     /Upgrade MCP did not connect: spawn node ENOENT/,
+  );
+  assert.ok(
+    fixture.logs.some((entry) =>
+      (entry as { body: { message: string } }).body.message.includes(
+        "Upgrade MCP enable failed: details withheld",
+      ),
+    ),
+  );
+  assert.ok(
+    fixture.logs.every(
+      (entry) =>
+        !(entry as { body: { message: string } }).body.message.includes(
+          "spawn node ENOENT",
+        ),
+    ),
   );
 });
 
@@ -725,31 +988,54 @@ test("createUpgradeAgentPlugin_PartialInitialization_Expect_DisposesClient", asy
 
   // Assert
   await assert.rejects(action, /prime failed/);
+  assert.ok(
+    fixture.logs.some((entry) =>
+      (entry as { body: { message: string } }).body.message.includes(
+        "Upgrade MCP initialization failed: details withheld",
+      ),
+    ),
+  );
   assert.equal(fixture.disposed.value, true);
   assert.equal(fixture.proxy(), undefined);
 });
 
 test("createUpgradeAgentPlugin_ConfigConflictAndDisposeBeforeEnable_Expect_NoInitialization", async () => {
-  // Arrange
-  const fixture = setup();
-  const plugin = await createUpgradeAgentPlugin(
-    fixture.runtime,
-    {},
-    fixture.dependencies,
-  );
+  await withSensitiveLogging(false, async () => {
+    // Arrange
+    const fixture = setup();
+    const plugin = await createUpgradeAgentPlugin(
+      fixture.runtime,
+      {},
+      fixture.dependencies,
+    );
 
-  // Act
-  const conflict = () =>
-    plugin.config!({
-      mcp: { Upgrade: { command: ["existing"], type: "local" } },
-    });
-  await assert.rejects(conflict, /MCP key "Upgrade"/);
-  await plugin.dispose!();
-  const disposed = () => plugin.config!({});
+    // Act
+    const conflict = () =>
+      plugin.config!({
+        mcp: { Upgrade: { command: ["existing"], type: "local" } },
+      });
+    await assert.rejects(conflict, /MCP key "Upgrade"/);
+    await plugin.dispose!();
+    const disposed = () => plugin.config!({});
 
-  // Assert
-  await assert.rejects(disposed, /disposed/);
-  assert.equal(fixture.proxy(), undefined);
+    // Assert
+    await assert.rejects(disposed, /disposed/);
+    assert.ok(
+      fixture.logs.some(
+        (entry) =>
+          (entry as { body: { message: string } }).body.message ===
+          'Upgrade MCP configuration failed: MCP key "Upgrade" is already configured.',
+      ),
+    );
+    assert.ok(
+      fixture.logs.some(
+        (entry) =>
+          (entry as { body: { message: string } }).body.message ===
+          "Upgrade MCP configuration failed: Upgrade plugin was disposed.",
+      ),
+    );
+    assert.equal(fixture.proxy(), undefined);
+  });
 });
 
 test("getPluginOptions_InvalidSampling_Expect_ThrowsException", () => {

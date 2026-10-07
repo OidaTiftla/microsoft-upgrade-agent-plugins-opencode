@@ -11,17 +11,26 @@ import {
   callUpgradeCoreTool,
   requestUpgradeInvocationContext,
   requestUpgradeMcpTools,
+  reportUpgradeMcpDiagnostic,
   type UpgradeMcpProxyEndpoint,
 } from "./upgrade-mcp-proxy-transport.ts";
+import {
+  formatPluginError,
+  LoggedMcpTransport,
+  SAFE_PLUGIN_ERROR_MESSAGES,
+  SafePluginError,
+  type DiagnosticLogger,
+} from "./plugin-logging.ts";
 
 interface ProxyConfig {
   readonly endpoint: UpgradeMcpProxyEndpoint;
   readonly token: string;
 }
 
-const ENVIRONMENT_ERROR = "Upgrade MCP proxy environment is invalid.";
 const TRANSPORT_FAILURE: CallToolResult = {
-  content: [{ text: "Upgrade MCP proxy request unavailable.", type: "text" }],
+  content: [
+    { text: SAFE_PLUGIN_ERROR_MESSAGES.proxyRequestUnavailable, type: "text" },
+  ],
   isError: true,
 };
 
@@ -41,11 +50,14 @@ function readConfig(environment: NodeJS.ProcessEnv): ProxyConfig {
     token === undefined ||
     token.length === 0
   )
-    throw new Error(ENVIRONMENT_ERROR);
+    throw new SafePluginError("proxyEnvironment");
   return { endpoint: { host, port }, token };
 }
 
-export function createUpgradeMcpProxy(config: ProxyConfig): Server {
+export function createUpgradeMcpProxy(
+  config: ProxyConfig,
+  log: DiagnosticLogger = () => undefined,
+): Server {
   const server = new Server(
     { name: "opencode-microsoft-upgrade-agent-proxy", version: "0.1.1" },
     { capabilities: { tools: {} } },
@@ -58,7 +70,11 @@ export function createUpgradeMcpProxy(config: ProxyConfig): Server {
           signal: normalizeSignal(extra.signal),
         }),
       } as ListToolsResult;
-    } catch {
+    } catch (error) {
+      log(
+        "error",
+        `Upgrade proxy tool listing failed: ${formatPluginError(error)}`,
+      );
       return { tools: [] };
     }
   });
@@ -78,7 +94,11 @@ export function createUpgradeMcpProxy(config: ProxyConfig): Server {
         name,
         signal,
       })) as CallToolResult;
-    } catch {
+    } catch (error) {
+      log(
+        "error",
+        `Upgrade proxy tool call failed: ${formatPluginError(error)}`,
+      );
       return TRANSPORT_FAILURE;
     }
   });
@@ -86,10 +106,39 @@ export function createUpgradeMcpProxy(config: ProxyConfig): Server {
 }
 
 async function run(): Promise<void> {
-  const server = createUpgradeMcpProxy(readConfig(process.env));
-  await server.connect(new StdioServerTransport());
+  const config = readConfig(process.env);
+  const log: DiagnosticLogger = (level, message) => {
+    void reportUpgradeMcpDiagnostic({ ...config, level, message }).catch(
+      (error: unknown) => {
+        console.error(
+          "Upgrade proxy logging failed:",
+          formatPluginError(error),
+          message,
+        );
+      },
+    );
+  };
+  const server = createUpgradeMcpProxy(config, log);
+  try {
+    await server.connect(
+      new LoggedMcpTransport(
+        new StdioServerTransport(),
+        "Upgrade proxy",
+        "outgoing",
+        log,
+      ),
+    );
+  } catch (error) {
+    await reportUpgradeMcpDiagnostic({
+      ...config,
+      level: "error",
+      message: `Upgrade proxy startup failed: ${formatPluginError(error)}`,
+    }).catch(() => undefined);
+    throw error;
+  }
 }
 
-void run().catch(() => {
+void run().catch((error: unknown) => {
+  console.error("Upgrade proxy startup failed:", formatPluginError(error));
   process.exitCode = 1;
 });
