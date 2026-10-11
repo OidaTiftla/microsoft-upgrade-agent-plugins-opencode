@@ -314,6 +314,9 @@ app.MapDefaultControllerRoute();
 // forwarder route below so forwarded requests bypass the auth middleware; naming the scheme on
 // migrated endpoints is the less surprising of the two.
 //</remoteauth>
-app.MapForwarder("/{**catch-all}", app.Configuration["ProxyTo"]!).Add(static builder => ((RouteEndpointBuilder)builder).Order = int.MaxValue);
+// Keep the same readable last-resort order as the Web API and Visual Studio scaffolds.
+// WithOrder states it directly; the analysis also reads a recognized constant-only Add assignment.
+// This order is not proof of migration: confirm local coverage and runtime host attribution.
+app.MapForwarder("/{**catch-all}", app.Configuration["ProxyTo"]!).WithOrder(int.MaxValue);
 
 app.Run();

@@ -42,17 +42,18 @@ For React **major** bumps specifically, don't leave those ecosystem companions t
 
 If `react`/`react-dom` appear only under the manifest's `peerDependencies` — a library that renders React but doesn't own its version — there's nothing to "upgrade" in the usual sense. See react.md ("Libraries that declare React as a peer dependency"): widen the peer range to add the new major and bump the matching `devDependencies` pin. Don't present this as a peer opt-in.
 
-### MUI + Emotion is a compatibility group
+### MUI core + Emotion is a compatibility group; MUI X is separate
 
-**Exception:** if `applicableGuidance` from the scan includes a `mui.md` entry (an entry whose `file` is `mui.md`), treat the MUI cluster as a group that upgrades together. When the user requests any `@mui/*` or `@emotion/*` package, present the rest of the cluster present in the manifest — `@mui/material`, `@mui/icons-material`, the `@mui/x-*` packages, and the `@emotion/react` / `@emotion/styled` styling engine — with an explicit **recommendation to include** them (not a neutral opt-in). Emotion is `@mui/material`'s peer styling engine, and `@mui/x-*` must not lead `@mui/material`'s major, so leaving one behind causes peer-dependency errors at install time. See [mui.md](./mui.md) for the coupling rules.
+**Exception:** if `applicableGuidance` from the scan includes a `mui.md` entry (an entry whose `file` is `mui.md`), coordinate Material UI core and its styling engine without forcing MUI X onto the same version line. For a request involving `@mui/material`, `@mui/icons-material`, `@emotion/react`, or `@emotion/styled`, present the other core/Emotion packages that are present in the manifest with an explicit **recommendation to include** them, but exclude `@mui/x-*` packages from that recommendation. For a request involving an `@mui/x-*` package, keep that migration separate: include only the requested X packages and any packages required by their target peer ranges, and recommend a Material UI core change only when the target X package requires it. See [mui.md](./mui.md) for the coupling rules.
 
 ### TanStack Query, Table, and Router use family-specific companion packages
 
 If `applicableGuidance` includes `tanstack.md`, keep direct dependencies from the same family in
 the same upgrade group: Query's React adapter/core/devtools/persistence packages, Table's React
 adapter/core packages, and Router's React adapter/core/plugin/CLI/devtools packages. Upgrade every
-included package to **its own latest compatible version**; the Query, Table, and Router version
-lines are independent and must not be forced to one shared version. Check each target React
+included package to **its explicit requested target when present, otherwise its own latest compatible
+version**; the Query, Table, and Router version lines are independent and must not be forced to one
+shared version. Check each target React
 adapter's declared peer range and surface the React core as a required peer-floor upgrade when the
 project is below it. See [tanstack.md](./tanstack.md).
 
@@ -83,7 +84,8 @@ upgrade is requested; do not silently expand a Query-only request into a tRPC ma
 
 **Exception:** if `applicableGuidance` includes `react-hook-form.md`, recommend upgrading
 `react-hook-form` and every `@hookform/*` package present in the manifest together, while resolving
-each package to its own latest compatible version. In particular, `@hookform/resolvers` v5 requires
+each package to its explicit requested target when present, otherwise its own latest compatible
+version. In particular, `@hookform/resolvers` v5 requires
 `react-hook-form` 7.55.0 or newer and changes resolver typing to distinguish form input from
 validated output. Leaving React Hook Form stale can fail installation; upgrading only the resolver
 can also expose TypeScript errors where schema transforms/defaults make input and output differ.

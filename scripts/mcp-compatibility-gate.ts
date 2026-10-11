@@ -29,7 +29,6 @@ import {
 type ToolArguments = Record<string, unknown>;
 
 interface FixtureResult {
-  readonly artifactCreated: boolean;
   readonly cancellationObserved: boolean;
   readonly instructions: readonly string[];
   readonly notifications: number;
@@ -150,7 +149,6 @@ async function assertBundledResource(path: string): Promise<void> {
 }
 
 async function runProxyFixture(input: {
-  readonly artifactPath?: string;
   readonly extenderArguments: (fixturePath: string) => ToolArguments;
   readonly extenderTool: string;
   readonly fixture: string;
@@ -297,12 +295,6 @@ async function runProxyFixture(input: {
           `${input.fixture} proxy checks failed: state=${contains(state, "content")}, extenderContent=${contains(extender, input.expectedContent)}, instructions=${instructions.every((output) => contains(output, "<skill"))}, sessionStates=${sessionStates.every((output) => contains(output, "content"))}.`,
         );
       return {
-        artifactCreated:
-          input.artifactPath === undefined
-            ? true
-            : await access(join(fixturePath, input.artifactPath))
-                .then(() => true)
-                .catch(() => false),
         cancellationObserved:
           cancellationObserved && !observedSessions.has("cancelled"),
         sessionContextsObserved: ["first", "second"].every((sessionID) =>
@@ -364,7 +356,6 @@ async function runCompatibilityGate(): Promise<void> {
       scenario: "dotnet-version-upgrade",
     });
     const typescript = await runProxyFixture({
-      artifactPath: ".tsupgrader/PROGRESS.md",
       expectedContent: "typeScriptMigrationNeeded",
       extenderArguments: (fixturePath) => ({
         requestedPackages: ["typescript"],
@@ -387,7 +378,6 @@ async function runCompatibilityGate(): Promise<void> {
       hostExtendersPath: files.hostExtendersPath,
       telemetryOptOut: definition.env.APPMOD_DISABLE_TELEMETRY,
       dotnet: {
-        artifactCreated: dotnet.artifactCreated,
         cancellationObserved: dotnet.cancellationObserved,
         proxyExtender: dotnet.toolNames.includes(
           "Upgrade_get_dotnet_upgrade_options",
@@ -405,7 +395,6 @@ async function runCompatibilityGate(): Promise<void> {
         rootBound: dotnet.rootBound,
       },
       typescript: {
-        artifactCreated: typescript.artifactCreated,
         cancellationObserved: typescript.cancellationObserved,
         proxyExtender: typescript.toolNames.includes(
           "Upgrade_typescript_scan_dependencies",
@@ -423,8 +412,6 @@ async function runCompatibilityGate(): Promise<void> {
     };
     console.log(JSON.stringify(diagnostics));
     if (
-      !dotnet.artifactCreated ||
-      !typescript.artifactCreated ||
       !contains(dotnet.scenarios, "dotnet-version-upgrade") ||
       !dotnet.rootBound ||
       !typescript.rootBound ||

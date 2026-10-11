@@ -65,6 +65,11 @@ test("registerConvertedAgents_BundledAgents_Expect_PreservedOpenCodeConfiguratio
       ?.Upgrade_open_dashboard,
     "deny",
   );
+  assert.equal(
+    (config.agent?.Upgrade?.permission as Record<string, string> | undefined)
+      ?.Upgrade_analyze_route_ownership,
+    "allow",
+  );
   const upgradePermissions = Object.keys(
     config.agent?.Upgrade?.permission ?? {},
   );

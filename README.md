@@ -15,6 +15,12 @@ git restore --ours -- CHANGELOG.md # restore CHANGELOG.md from upstream-main
 mv CHANGELOG.md CHANGELOG_UPSTREAM.md
 git restore --theirs -- CHANGELOG.md # restore CHANGELOG.md from main
 git add CHANGELOG.md CHANGELOG_UPSTREAM.md
+# remove removed things again, stage as necessary yourself
+rm .github/plugin/marketplace.json plugins/upgrade-agent/plugin.json # remove the github-copilot marketplace
+rm -rf assets/ plugins/upgrade-agent/assets/ plugins/README.md plugins/upgrade-agent/README.md # remove unused assets
+rm -rf cloud-agent/ # remove unsupported cloud-agent
+rm -rf plugins/upgrade-agent/com.github.copilot/extensions/upgrade-agent-dashboard/ plugins/upgrade-agent/upgrade/skills/system/dashboard-canvas/ # remove the unsupported extension
+rm -rf plugins/upgrade-agent/hooks/scripts/track-telemetry.ps1 plugins/upgrade-agent/hooks/scripts/track-telemetry.sh plugins/upgrade-agent/tests/TrackTelemetry.Tests.py # remove telemetry scripts/hooks
 # resolve rest of the conflicts
 ```
 

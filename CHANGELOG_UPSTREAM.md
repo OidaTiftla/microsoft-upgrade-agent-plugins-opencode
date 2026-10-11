@@ -4,6 +4,94 @@ All notable changes to the upgrade-agent plugin are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.685] - 2026-10-09
+
+### Added
+
+- New skill for moving ASP.NET Framework background work (WebBackgrounder, `HostingEnvironment.QueueBackgroundWorkItem` and `IRegisteredObject`, console job runners) to ASP.NET Core, with a guard against the same job running in both apps during a side-by-side migration.
+
+### Changed
+
+- ASP.NET Framework-to-Core migration guidance now preserves the JSON property naming of existing responses across MVC, Web API, Minimal API, and manual serialization, so clients do not see renamed fields after the move.
+- Route-ownership analysis keeps more of each Framework route in its report: HTTP verb constraints, controller and action defaults, and every route expansion.
+- Route-ownership analysis now finds routes registered through renamed or compiled route-wrapper helpers instead of missing them.
+- Migration confirmation options are now shown inside the confirmation question, so they stay visible in every client, including the GitHub App.
+
+### Fixed
+
+- Route-ownership analysis no longer marks a Framework route as removable while it can still be reached through a YARP path transform, a CORS preflight a YARP forwarder carries, or a method body that runs through interface or virtual dispatch. Ignored routes behind a forwarder now report that they are still forwarded, and a regex constraint ending in `?` is no longer read as an optional parameter.
+- Assessment queries return fresh results after an assessment is rerun.
+- Project caching now tracks NuGet-generated imports correctly for C#, Visual Basic, and F# projects.
+- The canvas At a glance, Repository summary, and Execution > Repository views now agree on changed files and commits, and list uncommitted changes.
+
+## [1.1.652] - 2026-10-02
+
+### Changed
+
+- Route-ownership analysis is stricter about when a Framework route can be removed. It now reads the content types an ASP.NET Core endpoint accepts, keeps Framework URL space it cannot prove is covered (unseen controllers, unresolved symbols, unbound ASP.NET Core attributes) from licensing a deletion, and accepts uses of the MVC global filter collection only in an exact list of recognized forms.
+- Project analysis is faster: MSBuild projects are loaded once and reused across analysis steps instead of being re-evaluated for each one.
+- Extenders can declare upgrade hooks in `upgrade-extension.json`. The .NET extender now supplies repository facts for scenario discovery through a `collect_facts` hook.
+- Extenders now read orchestrator session events from a per-session journal, so an extender that starts late still sees the session's earlier events.
+- Updated the bundled TypeScript extender to 0.1.15.
+
+### Fixed
+
+- Builds of legacy ASP.NET Web Application projects now find Visual Studio MSBuild on machines that have only a Preview, Insiders, Canary, or Build Tools edition installed, instead of reporting the tooling as missing.
+- .NET assessments of a folder without a solution file now load every discovered project, so they no longer report zero projects.
+- The dashboard now distinguishes "no assessment data yet" from "the assessment found nothing", so a missing assessment no longer reads as an all-clear.
+- When given a solution path that does not exist, the upgrade workflow now stores its plan and assessment under the real containing folder, so the dashboard and resume can find them.
+- When two installed copies of an extender have the same version, the copy in the plugin root selected by the Copilot CLI or Agency is now used.
+- NuGet package IDs and target framework prefixes are now compared case-insensitively when checking package compatibility and replacements.
+- Razor view discovery and other identifier comparisons no longer depend on the machine's culture settings.
+- The canvas side panel now lays out correctly at narrow widths in the Activity Log, By File, Assessment, Dependencies, and Options views.
+- Canvas empty states now say whether data is not available yet or was not produced at all, instead of naming internal files such as `tasks.md`.
+
+## [1.1.612] - 2026-09-29
+
+### Changed
+
+- Route-ownership guidance now covers endpoint ordering, fallback routing, and configuration-read failures when deciding whether ASP.NET Core owns a route.
+- Updated the bundled TypeScript extender to 0.1.14.
+
+### Fixed
+
+- Binary API scanning uses less memory during analysis without changing its results.
+- The dashboard activity list and recent commits now use native button controls for keyboard and assistive-technology access.
+
+## [1.1.596] - 2026-09-27
+
+### Added
+
+- New `analyze_route_ownership` tool and cross-host route-ownership skill for side-by-side ASP.NET Framework and ASP.NET Core migrations behind a YARP proxy. It works out which host owns each route, so Framework code is only removed once ASP.NET Core provably serves that traffic.
+
+### Changed
+
+- The MVC filters skill now covers migrating custom `AuthorizeAttribute` subclasses to ASP.NET Core authorization policies and filters.
+- The Razor views skill now covers custom view-location precedence.
+- The OData and ASP.NET Framework-to-Core migration skills now check for externally consumed wire contracts before changing serialization, so clients outside the migration keep working.
+- API compatibility lookups during assessment are faster.
+- Updated the bundled TypeScript extender to 0.1.13, which renames its skills to `jsts-dependabot` and `jsts-framework-migration`.
+- Clarified the privacy disclosures; diagnostic telemetry now sends only failure IDs and exception types.
+- Refreshed bundled front-end dependencies in the dashboard and the VS Code extension.
+
+### Fixed
+
+- Under Agency, the bundled extenders and skills are now discovered when the Upgrade agent is launched with `--agent`, so .NET and TypeScript scenarios are offered.
+- Bundled extenders are now discovered from the running plugin's own folder.
+- The .NET MCP server no longer crashes at startup on machines where the ONNX runtime fails to load; the embedding model now loads on first use.
+- The .NET assessment now reports compiler-specific breaking changes only for projects written in the affected language, so F#-only issues are no longer reported against C# projects.
+- A `global.json` that pins an uninstalled .NET SDK now produces a clear error instead of a crash.
+- Route-ownership analysis is more conservative: it no longer reports a Framework route as handled by ASP.NET Core while middleware, forwarders or unproven Core builders could still send its traffic to Framework.
+- `analyze_route_ownership` no longer requires `proxyProjectPath`, and returns compact JSON.
+- The dashboard no longer hangs when a request fails, and the Current task card updates correctly after an upgrade completes.
+- The dashboard now shows loading and reconnecting states instead of a blank or stale view while live updates reconnect.
+- PowerShell compatibility validation results are no longer stale after a profile is regenerated.
+- Fixed two MCP tool-dispatch defects.
+
+### Security
+
+- The dashboard server now sanitizes request-derived values before logging them, preventing forged log entries.
+
 ## [1.1.539] - 2026-09-15
 
 ### Added
