@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    // "opencode-microsoft-upgrade-agent",
+    ["../src/index.ts", { "sampling": "ask" }]
+  ],
+  "permission": {
+    "sampling": "ask"
+  }
+}
