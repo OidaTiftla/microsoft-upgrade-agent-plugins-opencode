@@ -137,12 +137,35 @@ function pinExtenderManifest(
   const args = mcp.args as unknown[];
   const pinnedArgs = [...args];
   pinnedArgs[packageIndex] = `${pin.package}@${pin.version}`;
+  const hooks = manifest.upgradeHooks as
+    Record<string, Record<string, unknown>> | undefined;
   return {
     ...manifest,
     mcp: {
       ...mcp,
       args: pinnedArgs,
     },
+    ...(hooks === undefined
+      ? {}
+      : {
+          upgradeHooks: Object.fromEntries(
+            Object.entries(hooks).map(([name, hook]) => [
+              name,
+              {
+                ...hook,
+                ...(Array.isArray(hook.args)
+                  ? {
+                      args: hook.args.map((argument: unknown) =>
+                        argument === pin.package
+                          ? `${pin.package}@${pin.version}`
+                          : argument,
+                      ),
+                    }
+                  : {}),
+              },
+            ]),
+          ),
+        }),
   };
 }
 

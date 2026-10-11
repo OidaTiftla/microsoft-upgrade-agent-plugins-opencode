@@ -62,6 +62,7 @@ const UPGRADE_TOOLS = new Set([
   "start_task",
   "complete_task",
   "open_dashboard",
+  "analyze_route_ownership",
   "break_down_task",
   "discover_upgrade_scenarios",
   "predict_token_usage",

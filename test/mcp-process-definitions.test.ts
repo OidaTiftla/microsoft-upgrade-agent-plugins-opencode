@@ -156,6 +156,57 @@ test("writeHostDiscoveryFiles_PinnedExtenders_Expect_DerivedManifests", async ()
   }
 });
 
+test("writeHostDiscoveryFiles_BundledDotnetHook_Expect_PinnedPackage", async () => {
+  // Arrange
+  const root = await mkdtemp(join(tmpdir(), "mcp-host-discovery-"));
+  const pluginRoot = join(root, "plugins", "upgrade-agent");
+  const bundledManifest = JSON.parse(
+    await readFile(
+      new URL(
+        "../plugins/upgrade-agent/upgrade/dotnet/upgrade-extension.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  const manifestPath = join(
+    pluginRoot,
+    "upgrade",
+    "dotnet",
+    "upgrade-extension.json",
+  );
+  try {
+    await mkdir(dirname(manifestPath), { recursive: true });
+    await writeFile(manifestPath, JSON.stringify(bundledManifest));
+
+    // Act
+    const files = await writeHostDiscoveryFiles(
+      join(root, "host"),
+      pluginRoot,
+      parseMcpVersionManifest(versionManifest),
+    );
+    const installed = JSON.parse(
+      await readFile(files.extenders[0].manifestPath, "utf8"),
+    );
+
+    // Assert
+    assert.deepEqual(installed.upgradeHooks.collect_facts.args, [
+      `${versionManifest.dotnet!.package}@${versionManifest.dotnet!.version}`,
+      "--yes",
+      "--ignore-failed-sources",
+      "--",
+      "--hook",
+      "collect_facts",
+    ]);
+    assert.equal(
+      installed.mcp.args[0],
+      installed.upgradeHooks.collect_facts.args[0],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("writeHostDiscoveryFiles_DiscoveredExtenders_Expect_DeterministicOrder", async () => {
   // Arrange
   const root = await mkdtemp(join(tmpdir(), "mcp-host-discovery-"));
