@@ -14,7 +14,7 @@ env:
   DOTNET_NOLOGO: "true"
 
   # renovate: datasource=docker depName=mcr.microsoft.com/dotnet/sdk versioning=docker
-  DOTNET_VERSION: 10.0.401
+  DOTNET_VERSION: 10.0.402
 
   # renovate: datasource=docker depName=node versioning=semver
   NODE_VERSION: 24.21.0
